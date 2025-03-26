@@ -188,85 +188,96 @@ module mkBitmapWindowStorage(BitmapWindowStorage#(tRowAddr, tData, tBoundary, sz
 
         let pipelineEntryIn = stageOneToTwoPipelineQueue.first;
         stageOneToTwoPipelineQueue.deq;
-
         let entryFromBram = ?;
-        if (!pipelineEntryIn.isReset) begin
+
+        if (pipelineEntryIn.isReset) begin
+            let bramWriteBackReq = BitmapWindowStorageStageTwoToThreePipelineEntry {
+               rowAddr : pipelineEntryIn.rowAddr,
+               newEntry: pipelineEntryIn.newEntry
+            };
+            stageTwoToThreePipelineQueue.enq(bramWriteBackReq);
+            storageForwardBuffer.enq(pipelineEntryIn.rowAddr, pipelineEntryIn.newEntry);
+        end
+        else begin
             entryFromBram = storage[0].readRespPipeOut.first;
             storage[0].readRespPipeOut.deq;
+            let entryFromForwardCacheMaybe <- storageForwardBuffer.search(pipelineEntryIn.rowAddr);
+            let newestAlreadyExistEntry = entryFromBram;
+            if (entryFromForwardCacheMaybe matches tagged Valid .entryFromForwardCache) begin
+                newestAlreadyExistEntry = entryFromForwardCache;
+            end
+
+            let oldEntry = newestAlreadyExistEntry;
+
+            tBoundary boundaryDelta     = pipelineEntryIn.newEntry.leftBound - newestAlreadyExistEntry.leftBound;
+            tBoundary boundaryDeltaNeg  = newestAlreadyExistEntry.leftBound - pipelineEntryIn.newEntry.leftBound;
+
+            tBoundary boundaryDeltaAbs = msb(boundaryDelta) == 0 ? boundaryDelta : boundaryDeltaNeg;
+
+            let newEntry = pipelineEntryIn.newEntry;
+            tData windowShiftedOutData = -1;
+
+            let isShiftOutOfBoundary = msb(boundaryDelta) == 0 ? (
+               boundaryDelta > fromInteger(valueOf(TDiv#(szData, szStride)))
+               ) : (
+                  boundaryDeltaNeg > fromInteger(valueOf(TDiv#(szData, szStride)))
+                  );
+
+            // New entry falls behind the current window
+            let skipMergeStale = msb(boundaryDelta) == 1 && isShiftOutOfBoundary;
+
+            if (skipMergeStale) begin
+                let resp = BitmapWindowStorageUpdateResp {
+                   rowAddr                 : pipelineEntryIn.rowAddr,
+                   oldEntry                : oldEntry,
+                   windowShiftedOutData    : windowShiftedOutData,
+                   isShiftOutOfBoundary    : isShiftOutOfBoundary,
+                   isShiftWindow           : False,
+                   newEntry                : newEntry
+                   };
+                respPipeOutQueue.enq(resp);
+            end
+            else begin
+                let isShiftWindow = boundaryDelta > 0;
+                if (!isShiftWindow) begin
+                    newEntry.leftBound = newestAlreadyExistEntry.leftBound;
+                end
+                Bit#(TLog#(szData)) bitShiftCnt = truncate(pack(boundaryDeltaAbs)) << valueOf(TLog#(szStride));
+                tData allOneData = unpack(-1);
+                if (isShiftOutOfBoundary) begin
+                    newestAlreadyExistEntry.data = unpack(0);
+                    windowShiftedOutData = unpack(0);
+                end
+                else if (isShiftWindow) begin
+                    let tmpToShift = {pack(newestAlreadyExistEntry.data), pack(allOneData)};
+                    tmpToShift = tmpToShift >> bitShiftCnt;
+                    newestAlreadyExistEntry.data = unpack(truncateLSB(tmpToShift));
+                    windowShiftedOutData = unpack(truncate(tmpToShift));
+                end
+                else begin
+                    newEntry.data = newEntry.data >> bitShiftCnt;
+                end
+
+                newEntry.data = newEntry.data | newestAlreadyExistEntry.data;
+
+                let resp = BitmapWindowStorageUpdateResp {
+                   rowAddr                 : pipelineEntryIn.rowAddr,
+                   oldEntry                : oldEntry,
+                   windowShiftedOutData    : windowShiftedOutData,
+                   isShiftOutOfBoundary    : isShiftOutOfBoundary,
+                   isShiftWindow           : isShiftWindow,
+                   newEntry                : newEntry
+                   };
+                respPipeOutQueue.enq(resp);
+
+                let bramWriteBackReq = BitmapWindowStorageStageTwoToThreePipelineEntry {
+                   rowAddr : pipelineEntryIn.rowAddr,
+                   newEntry: newEntry
+                   };
+                stageTwoToThreePipelineQueue.enq(bramWriteBackReq);
+                storageForwardBuffer.enq(pipelineEntryIn.rowAddr, newEntry);
+            end
         end
-
-        let entryFromForwardCacheMaybe <- storageForwardBuffer.search(pipelineEntryIn.rowAddr);
-
-        let newestAlreadyExistEntry = entryFromBram;
-        if (entryFromForwardCacheMaybe matches tagged Valid .entryFromForwardCache) begin
-            newestAlreadyExistEntry = entryFromForwardCache;
-        end
-
-        let oldEntry = newestAlreadyExistEntry;
-
-        tBoundary boundaryDelta     = pipelineEntryIn.newEntry.leftBound - newestAlreadyExistEntry.leftBound;
-        tBoundary boundaryDeltaNeg  = newestAlreadyExistEntry.leftBound - pipelineEntryIn.newEntry.leftBound;
-
-        tBoundary boundaryDeltaAbs = msb(boundaryDelta) == 0 ? boundaryDelta : boundaryDeltaNeg;
-        let isShiftWindow = boundaryDelta > 0;
-
-        let newEntry = pipelineEntryIn.newEntry;
-        tData windowShiftedOutData = -1;
-
-        let isShiftOutOfBoundary = msb(boundaryDelta) == 0 ? ( 
-                boundaryDelta > fromInteger(valueOf(TDiv#(szData, szStride)))
-            ) : (
-                boundaryDeltaNeg > fromInteger(valueOf(TDiv#(szData, szStride)))
-            );
-
-        if (isShiftWindow) begin
-            newestAlreadyExistEntry.leftBound = newEntry.leftBound;
-        end
-        else begin
-            newEntry.leftBound = newestAlreadyExistEntry.leftBound;
-        end
-
-
-        Bit#(TLog#(szData)) bitShiftCnt = truncate(pack(boundaryDeltaAbs)) << valueOf(TLog#(szStride));
-        tData allOneData = unpack(-1);
-        if (isShiftOutOfBoundary) begin
-            newestAlreadyExistEntry.data = unpack(0);
-            windowShiftedOutData = unpack(0);
-        end
-        else if (isShiftWindow) begin
-            let tmpToShift = {pack(newestAlreadyExistEntry.data), pack(allOneData)};
-            tmpToShift = tmpToShift >> bitShiftCnt;
-            newestAlreadyExistEntry.data = unpack(truncateLSB(tmpToShift));
-            windowShiftedOutData = unpack(truncate(tmpToShift));
-        end
-        else begin 
-            newEntry.data = newEntry.data >> bitShiftCnt;
-        end
-
-
-        newEntry.data = newEntry.data | newestAlreadyExistEntry.data;
-        
-        if (!pipelineEntryIn.isReset) begin
-            let resp = BitmapWindowStorageUpdateResp {
-                rowAddr                 : pipelineEntryIn.rowAddr,
-                oldEntry                : oldEntry,
-                windowShiftedOutData    : windowShiftedOutData,
-                isShiftOutOfBoundary    : isShiftOutOfBoundary,
-                isShiftWindow           : isShiftWindow,
-                newEntry                : newEntry
-            };
-            respPipeOutQueue.enq(resp);
-        end
-        else begin
-            newEntry = pipelineEntryIn.newEntry;
-        end
-
-        let bramWriteBackReq = BitmapWindowStorageStageTwoToThreePipelineEntry {
-            rowAddr : pipelineEntryIn.rowAddr,
-            newEntry: newEntry
-        };
-        stageTwoToThreePipelineQueue.enq(bramWriteBackReq);
-        storageForwardBuffer.enq(pipelineEntryIn.rowAddr, newEntry);
     endrule
 
     // Merge Pipeline Stage Three
