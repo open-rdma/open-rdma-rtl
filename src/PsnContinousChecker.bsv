@@ -238,7 +238,7 @@ module mkBitmapWindowStorage(BitmapWindowStorage#(tRowAddr, tData, tBoundary, sz
                 respPipeOutQueue.enq(resp);
             end
             else begin
-                let isShiftWindow = boundaryDelta > 0;
+                let isShiftWindow = msb(boundaryDelta) == 0 && boundaryDelta > 0;
                 if (!isShiftWindow) begin
                     newEntry.leftBound = newestAlreadyExistEntry.leftBound;
                 end
