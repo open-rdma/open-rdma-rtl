@@ -218,9 +218,9 @@ module mkBitmapWindowStorage(BitmapWindowStorage#(tRowAddr, tData, tBoundary, sz
             tData windowShiftedOutData = -1;
 
             let isShiftOutOfBoundary = msb(boundaryDelta) == 0 ? (
-               boundaryDelta > fromInteger(valueOf(TDiv#(szData, szStride)))
+               boundaryDelta >= fromInteger(valueOf(TDiv#(szData, szStride)))
                ) : (
-                  boundaryDeltaNeg > fromInteger(valueOf(TDiv#(szData, szStride)))
+                  boundaryDeltaNeg >= fromInteger(valueOf(TDiv#(szData, szStride)))
                   );
 
             // New entry falls behind the current window
