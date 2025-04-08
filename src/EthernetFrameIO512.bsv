@@ -981,9 +981,11 @@ module mkEthernetPacketGenerator(EthernetPacketGenerator);
             end
         end
 
+        let byteNum = isLast ? truncate(ethernetFrameLeftByteCounterReg) : fromInteger(valueOf(DATA_BUS_BYTE_WIDTH));
+
         let outBeat = IoChannelEthDataStream{
             data: {payloadDataPartConsumedByThisBeat, payloadDataPartFromPreviousBeat},
-            byteNum: fromInteger(valueOf(DATA_BUS_BYTE_WIDTH)),
+            byteNum: byteNum,
             startByteIdx: 0,
             isFirst: False,
             isLast: isLast
