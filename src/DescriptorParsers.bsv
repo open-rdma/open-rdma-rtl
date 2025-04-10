@@ -132,7 +132,7 @@ module mkCommandQueueDescParserAndDispatcher(CommandQueueDescParserAndDispatcher
         descReadProxy.descFragsPipeOut.deq;
 
         RingbufRawDescriptor rawDesc = reqSegBuf[headDescIdx];
-        RingbufDescCommonHead descComHdr = unpack(truncate(rawDesc));
+        RingbufDescCommonHead descComHdr = unpack(truncate(rawDesc >> 240));
 
         case (unpack(truncate(descComHdr.opCode)))
             CmdQueueOpcodeUpdateMrTable, CmdQueueOpcodeUpdatePGT: begin
@@ -142,7 +142,7 @@ module mkCommandQueueDescParserAndDispatcher(CommandQueueDescParserAndDispatcher
             end
             CmdQueueOpcodeQpManagement: begin
                 CmdQueueReqDescQpManagement desc0 = unpack(reqSegBuf[0]);
-                
+
                 let ent = EntryQPC {
                     peerQPN   :     desc0.peerQPN,
                     qpnKeyPart:     getKeyQP(desc0.qpn), 
@@ -285,7 +285,8 @@ module mkDescriptorMux(DescriptorMux);
         // end
 
         if (rawDescMaybe matches tagged Valid .rawDesc) begin
-            RingbufDescCommonHead descHeader = unpack(truncate(pack(rawDesc)));
+            RingbufDescCommonHead descHeader = unpack(truncate(rawDesc >> 240));
+
             immAssert(
                 descHeader.valid,
                 "desc should be valid",
@@ -308,7 +309,7 @@ module mkDescriptorMux(DescriptorMux);
         let rawDesc = descPipeInQueueVec[currentForwardChannelReg].first;
         descPipeInQueueVec[currentForwardChannelReg].deq;
 
-        RingbufDescCommonHead descHeader = unpack(truncate(pack(rawDesc)));
+        RingbufDescCommonHead descHeader = unpack(truncate(rawDesc >> 240));
         immAssert(
             descHeader.valid,
             "desc should be valid",

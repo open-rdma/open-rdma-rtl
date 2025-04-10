@@ -682,7 +682,7 @@ module mkRingbufDescriptorReadProxy(RingbufDescriptorReadProxy#(n_desc));
         let rawDesc = ringbufQ.first;
         ringbufQ.deq;
         segBuf[0] <= rawDesc;
-        RingbufDescCommonHead head = unpack(truncate(rawDesc));
+        RingbufDescCommonHead head = unpack(truncate(rawDesc >> 240));
 
         let hasMoreSegs = head.hasNextFrag;
         if (!hasMoreSegs) begin

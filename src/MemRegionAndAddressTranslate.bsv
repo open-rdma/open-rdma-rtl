@@ -495,7 +495,7 @@ module mkMrAndPgtUpdater(MrAndPgtUpdater);
         reqQ.deq;
         // $display("PGT get modify request", fshow(descRaw));
 
-        RingbufDescCommonHead descComHdr = unpack(truncate(descRaw));
+        RingbufDescCommonHead descComHdr = unpack(truncate(descRaw >> 240));
 
         case (unpack(truncate(descComHdr.opCode)))
             CmdQueueOpcodeUpdateMrTable: begin
