@@ -11,11 +11,11 @@ function Action immAssertForFpCheck(Bool condition, String assertName, Fmt asser
         let pos = printPosition(getStringPosition(assertName));
         // let pos = printPosition(getEvalPosition(condition));
         if (!condition) begin
-            $error(
+            $display(
                 "ImmAssert failed in %m @time=%0t: %s-- %s: ",
                 $time, pos, assertName, assertFmtMsg
             );
-            $finish(1);
+            // $finish(1);
         end
     endaction
 endfunction

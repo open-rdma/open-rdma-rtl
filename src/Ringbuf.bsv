@@ -91,7 +91,9 @@ instance Literal#(RingbufPointer#(w));
 endinstance
 
 
+// typedef 16  USER_LOGIC_RING_BUF_4096_DEEP; 
 typedef 4096  USER_LOGIC_RING_BUF_4096_DEEP; 
+
 typedef TLog#(USER_LOGIC_RING_BUF_4096_DEEP)  USER_LOGIC_RING_BUF_4096_DEEP_WIDTH; 
 typedef RingbufPointer#(USER_LOGIC_RING_BUF_4096_DEEP_WIDTH) Fix128kBRingBufPointer;
 typedef RingbufC2h#(USER_LOGIC_RING_BUF_4096_DEEP_WIDTH) RingbufC2hSlot4096;
