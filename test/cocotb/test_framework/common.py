@@ -1,11 +1,14 @@
-import shutil
 import os
+import shutil
+import sys
 from collections import deque, OrderedDict
 from abc import ABC
 import logging
 import math
 from .hw_consts import MEM_REGION_PAGE_SIZE, LR_KEY_IDX_PART_WIDTH, LR_KEY_KEY_PART_WIDTH, QPN_IDX_PART_WIDTH, QPN_KEY_PART_WIDTH
 import asyncio
+import find_libpython
+import cocotb_tools.config
 
 import cocotb
 from cocotb.triggers import RisingEdge, FallingEdge, ReadWrite, ReadOnly, Edge, NextTimeStep, NullTrigger, Event
@@ -34,6 +37,22 @@ def copy_mem_file_to_sim_build_dir(src_dirs, target_dir):
                 if filename.endswith(".bin") or filename.endswith(".hex"):
                     shutil.copyfile(os.path.join(
                         dirpath, filename), os.path.join(target_dir, filename))
+
+
+def cocotb_extra_env():
+    """Build runtime env vars required by cocotb 2.x/dev custom simulator flows."""
+    env = {
+        "PYGPI_PYTHON_BIN": sys.executable,
+    }
+
+    libpython_path = find_libpython.find_libpython()
+    if libpython_path:
+        env["LIBPYTHON_LOC"] = libpython_path
+        env["GPI_USERS"] = ";".join(
+            [libpython_path, cocotb_tools.config.pygpi_entry_point()]
+        )
+
+    return env
 
 
 class BluespecValueMethod:

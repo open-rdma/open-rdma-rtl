@@ -6,7 +6,11 @@ This script only compiles the design with Verilator and does not run tests.
 import os
 import sys
 import cocotb_test.simulator
-from test_framework.common import gen_rtl_file_list, copy_mem_file_to_sim_build_dir
+from test_framework.common import (
+    cocotb_extra_env,
+    copy_mem_file_to_sim_build_dir,
+    gen_rtl_file_list,
+)
 
 
 def compile_verilator():
@@ -58,6 +62,7 @@ def compile_verilator():
         verilog_sources=verilog_sources,
         toplevel=dut,
         module=os.path.splitext(os.path.basename(__file__))[0],
+        extra_env=cocotb_extra_env(),
         timescale="1ns/1ps",
         sim_build=sim_build,
         waves=True,

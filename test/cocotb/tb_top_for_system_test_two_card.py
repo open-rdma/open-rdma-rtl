@@ -19,7 +19,7 @@ from cocotb.queue import Queue
 from test_framework.mock_host import UserspaceDriverServer, open_shared_mem_to_hw_simulator, EthPacketTcp
 
 
-from test_framework.common import gen_rtl_file_list, copy_mem_file_to_sim_build_dir
+from test_framework.common import cocotb_extra_env, gen_rtl_file_list, copy_mem_file_to_sim_build_dir
 from test_framework.eth_bfm import SimpleEthBehaviorModel
 from test_framework.pcie_bfm import SimplePcieBehaviorModel
 from test_framework.proxy_pcie_bfm import SimplePcieBehaviorModelProxy
@@ -237,6 +237,7 @@ def test_top_without_hard_ip():
         verilog_sources=verilog_sources,
         toplevel=toplevel,
         module=module,
+        extra_env=cocotb_extra_env(),
         timescale="1ns/1ps",
         sim_build=sim_build,
         waves=True,
