@@ -11,7 +11,7 @@ import cocotb_test.simulator
 import pytest
 
 import cocotb
-from cocotb.triggers import RisingEdge, FallingEdge, Timer
+from cocotb.triggers import RisingEdge, FallingEdge, Timer, NullTrigger
 from cocotb.regression import TestFactory
 from cocotb.clock import Clock
 from cocotb.queue import Queue
@@ -190,10 +190,11 @@ async def small_desc_fp_test(dut):
 
     tb = TB(dut)
 
-    await cocotb.start(Clock(tb.clock, 2, "ns").start())
+    cocotb.start_soon(Clock(tb.clock, 2, "ns").start())
 
-    await cocotb.start(tb.start_eth_packet_rpc())
+    cocotb.start_soon(tb.start_eth_packet_rpc())
 
+    await NullTrigger()
     await tb.gen_reset()
 
     tb.rpc_server.run()

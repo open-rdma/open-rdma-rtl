@@ -10,7 +10,6 @@ import os
 
 import cocotb
 from cocotb.triggers import RisingEdge, FallingEdge, ReadWrite, ReadOnly, Edge, NextTimeStep
-from cocotb.binary import BinaryValue
 from cocotb.queue import Queue
 import cocotb.triggers
 
