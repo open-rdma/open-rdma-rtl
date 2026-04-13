@@ -8,8 +8,8 @@ from .hw_consts import MEM_REGION_PAGE_SIZE, LR_KEY_IDX_PART_WIDTH, LR_KEY_KEY_P
 import asyncio
 
 import cocotb
-from cocotb.triggers import RisingEdge, FallingEdge, ReadWrite, ReadOnly, Edge, NextTimeStep
-from cocotb.binary import BinaryValue
+from cocotb.triggers import RisingEdge, FallingEdge, ReadWrite, ReadOnly, Edge, NextTimeStep, NullTrigger, Event
+from cocotb.types import LogicArray
 from cocotb.queue import Queue
 import cocotb.triggers
 
@@ -79,11 +79,15 @@ class BluespecValueMethod:
         self.log.debug(
             f"555555={kwargs}  retval={self.return_value_signal.value} signal={self.signal_base_name}")
 
-        async def _tttt():
+        async def _tttt(started: Event):
+            started.set()
             await NextTimeStep()
             self.log.debug(
                 f"6666666={kwargs}  retval={self.return_value_signal.value} signal={self.signal_base_name}")
-        await cocotb.start(_tttt())
+        # await cocotb.start(_tttt())
+        task_started = Event()
+        task = cocotb.start_soon(_tttt(task_started))
+        await task_started.wait()
 
         assert self.ready_signal.value
         return self.return_value_signal.value
@@ -132,7 +136,8 @@ class BluespecActionValueMethod:
     #             if self.ready_signal.value == 1:  # handshake success
 
     async def __call__(self, **kwargs):
-        async def _deassert_en_signal():
+        async def _deassert_en_signal(event: Event):
+            event.set()
             self.log.debug(
                 f"aaaaaaaa={kwargs}  signal={self.signal_base_name}")
             await RisingEdge(self.clk)
@@ -157,8 +162,14 @@ class BluespecActionValueMethod:
             getattr(self.dut, self.signal_base_name +
                     f"_{arg_name}").value = arg_val
 
-        await cocotb.start(_deassert_en_signal())
+
+        # await cocotb.start(_deassert_en_signal())
         # cocotb.start_soon(_deassert_en_signal())
+        # await NullTrigger()
+
+        task_started = Event()
+        task = cocotb.start_soon(_deassert_en_signal(task_started))
+        await task_started.wait()
 
         self.log.debug(
             f"444444={kwargs}  retval={self.return_value_signal.value if self.return_value_signal is not None else '<NA>'} signal={self.signal_base_name}")
@@ -192,15 +203,17 @@ class BluespecBits(BluespecType):
     _width = 0
 
     def __init__(self, value=None):
-        if not isinstance(value, BluespecBits):
-            self._inner = BinaryValue(
-                value, n_bits=self._width, bigEndian=False)
+        if isinstance(value, BluespecBits):
+            self._inner = LogicArray(value.pack(), self._width)
+        elif isinstance(value, bytes):
+            if len(value) * 8 < self._width:
+                value = value.ljust(self._width // 8, b'\0')
+            self._inner = LogicArray.from_bytes(value=value, range=self._width, byteorder="little")
         else:
-            self._inner = BinaryValue(
-                value.pack(), n_bits=value.width(), bigEndian=False)
+            self._inner = LogicArray(value, self._width)
 
     def pack(self):
-        return self._inner.integer
+        return self._inner.to_unsigned()
 
     @classmethod
     def unpack(cls, val):
@@ -211,10 +224,10 @@ class BluespecBits(BluespecType):
         return cls._width
 
     def __str__(self):
-        return str(hex(self._inner.integer))
+        return str(hex(self._inner.to_unsigned()))
 
     def __repr__(self):
-        return str(hex(self._inner.integer))
+        return str(hex(self._inner.to_unsigned()))
 
     def __call__(self):
         return self.pack()
@@ -265,6 +278,8 @@ class BluespecStruct(BluespecType):
     @classmethod
     def unpack(cls, val):
         args = []
+        if isinstance(val, LogicArray):
+            val = val.to_unsigned()
         for member_type in reversed(cls._members_def.values()):
             mask = (1 << member_type.width()) - 1
             member_val = val & mask
