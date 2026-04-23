@@ -84,9 +84,18 @@ owns that clock):
 """
 
 import logging
+import queue as _stdlib_queue
+import time
 from typing import Optional
 
+import cocotb
+from cocotb.queue import Queue as CocotbQueue
+from cocotb.triggers import RisingEdge
+from cocotbext.pcie.core.rc import RootComplex
 from cocotbext.pcie.intel.rtile.rtile_model import RTilePcieDevice
+from .mock_host import UserspaceDriverServer
+from .proxy_pcie_cocotb import PcieDmaRegionProxy
+from .iomem_helper import parse_iomem_system_ram, compute_pcie_address_layout
 
 # ---------------------------------------------------------------------------
 # Segment geometry for mkBsvTop's PCIe interface
@@ -336,6 +345,7 @@ def create_bsv_rtile_pcie_dev(
         pf0_msix_table_offset: int = 0x0000_0000,
         pf0_msix_pba_bir: int = 0,
         pf0_msix_pba_offset: int = 0x0000_0000,
+        pf0_bar0_size: int = 1 << 16,
 ) -> RTilePcieDevice:
     """
     Create and wire up an RTilePcieDevice that emulates the Intel R-Tile PCIe
@@ -377,6 +387,10 @@ def create_bsv_rtile_pcie_dev(
         pf0_msi_enable:      Enable MSI for PF0.
         pf0_msi_count:       MSI vector count for PF0.
         pf0_msix_*:          MSI-X configuration for PF0.
+        pf0_bar0_size:       BAR0 size in bytes (must be a power of 2).
+                             Default 64 KB (2^16) matches the hardware Quartus IP
+                             setting: core16_pf0_bar0_address_width_user_hwtcl=16,
+                             type="64-bit non-prefetchable memory".
 
     Returns:
         Configured RTilePcieDevice instance (``dev``).
@@ -441,4 +455,250 @@ def create_bsv_rtile_pcie_dev(
         # ----------------------------------------------------------------
     )
 
+    # ----------------------------------------------------------------
+    # BAR configuration — must match the Quartus rtile_pcie_hip.ip settings.
+    #
+    # Hardware (core16 = x16 PCIe, PF0):
+    #   BAR0: 64-bit non-prefetchable memory, address_width=16 → 64 KB
+    #   BAR1: Disabled (upper 32 bits of the 64-bit BAR0 pair — occupied but
+    #         not separately usable; cocotbext-pcie handles this automatically
+    #         when ext=True is passed to configure_bar).
+    #   BAR2–5: Disabled → no configure_bar call needed.
+    #
+    # Without this call bar_mask[0] stays 0, the RootComplex never assigns a
+    # PCIe address, and bar_window[0] is None after enumeration.
+    # ----------------------------------------------------------------
+    dev.functions[0].configure_bar(0, pf0_bar0_size, ext=True, prefetch=False)
+
     return dev
+
+
+# ---------------------------------------------------------------------------
+# BsvRootComplex
+# ---------------------------------------------------------------------------
+
+_bsv_rc_log = logging.getLogger("cocotb.BsvRootComplex")
+
+
+class BsvRootComplex(RootComplex):
+    """RootComplex，根据本机真实 RAM 自动计算 PCIe/MSI 安全地址，确保不与 System RAM 冲突。
+
+    自动完成：
+      - msi_base              迁移到第一个 32-bit RAM 空白区
+      - mem_base              放在 32-bit 空间最大 gap 内（最大对齐）
+      - prefetchable_mem_base 放在所有 RAM 地址之上（1 GB 对齐）
+      - mem_pool / io_pool    关闭
+
+    若 /proc/iomem 不可读（需 root），退回 RootComplex 默认地址（可能与 RAM 冲突，会有 WARNING）。
+    """
+
+    def __init__(self, *args, **kwargs):
+        if not {'msi_base', 'mem_base'}.issubset(kwargs):
+            ram_ranges = parse_iomem_system_ram()
+            if ram_ranges:
+                layout = compute_pcie_address_layout(ram_ranges)
+                kwargs.setdefault('msi_base',              layout['msi_base'])
+                kwargs.setdefault('mem_base',              layout['mem_base'])
+                kwargs.setdefault('prefetchable_mem_base', layout['prefetchable_mem_base'])
+            else:
+                raise RuntimeError(
+                    "无法读取 /proc/iomem RAM 布局（需 sudo 权限），"
+                    "无法安全初始化 PCIe 地址空间。"
+                )
+        kwargs.setdefault('mem_pool_range', None)
+        kwargs.setdefault('io_pool_range',  None)
+        super().__init__(*args, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# BsvTopTestBed
+# ---------------------------------------------------------------------------
+
+class BsvTopTestBed:
+    """
+    High-level test fixture for mkBsvTop simulation.
+
+    Combines:
+      - RTilePcieDevice  — replaces Intel R-Tile PCIe hard IP;
+                           drives dut.CLK and dut.RST_N
+      - RootComplex      — PCIe host (RC) side
+      - TCP CSR server   — listens for JSON CSR read/write requests from the
+                           real userspace RDMA driver and translates them to
+                           RootComplex BAR MMIO transactions
+
+    TCP protocol (same as UserspaceDriverServer / mock_host.py):
+      write request : {"is_write": true,  "addr": <int>, "value": <int>}
+      read  request : {"is_write": false, "addr": <int>}
+      read response : {"is_write": false, "addr": <int>, "value": <int>}
+
+    Clock / reset note
+    ------------------
+    RTilePcieDevice drives dut.CLK at pld_clk_frequency (default 500 MHz).
+    Do NOT call Clock(dut.CLK, …) separately in the testbench.
+    RTilePcieDevice also drives dut.RST_N (reset_status_n).
+    dut.RST_N_partitionReset must be handled in the testbench (see
+    tb_top_pcie_system_test.py for the recommended pattern).
+
+    Typical usage::
+
+        rc  = RootComplex()
+        tb  = BsvTopTestBed(dut, rc, csr_listen_port=7701)
+        await tb.setup()            # enumerate, BAR discovery, start TCP server
+        await RisingEdge(dut.RST_N) # wait for link-up / reset release
+        # userspace driver can now connect on port 7701
+        …
+        tb.stop()
+    """
+
+    def __init__(
+            self,
+            dut,
+            rc: RootComplex,
+            csr_listen_addr: str = "0.0.0.0",
+            csr_listen_port: int = 7701,
+            dma_tcp_host: str = "127.0.0.1",
+            dma_tcp_port: int = 7003,
+            dma_channel_id: int = 0,
+            **kwargs,
+    ):
+        """
+        Args:
+            dut:              cocotb DUT handle (mkBsvTop).
+            rc:               RootComplex instance.
+            csr_listen_addr:  TCP bind address for the CSR server.
+            csr_listen_port:  TCP port for the CSR server.
+            dma_tcp_host:     PcieDmaRegionProxy TCP host.
+            dma_tcp_port:     PcieDmaRegionProxy TCP port.
+            dma_channel_id:   PcieDmaRegionProxy channel ID.
+            **kwargs:         forwarded to create_bsv_rtile_pcie_dev
+                              (pin_perst_n, pcie_generation, pld_clk_frequency, …).
+        """
+        self.log = logging.getLogger("cocotb.BsvTopTestBed")
+        self.clock = dut.CLK
+        
+        self.rc  = rc
+        self.dev = create_bsv_rtile_pcie_dev(dut, **kwargs)
+        self._bar = None
+        
+        self._csr_listen_addr = csr_listen_addr
+        self._csr_listen_port = csr_listen_port
+        self._csr_server: Optional[UserspaceDriverServer] = None
+
+        self._dma_tcp_host   = dma_tcp_host
+        self._dma_tcp_port   = dma_tcp_port
+        self._dma_channel_id = dma_channel_id
+        self._dma_proxy:   Optional[PcieDmaRegionProxy] = None
+        self._dma_windows: list = []
+
+        # Queue bridge: sync TCP thread ↔ cocotb scheduler
+        # CocotbQueue supports put_nowait() from threads and await get() in coroutines.
+        self._csr_write_queue     = CocotbQueue()
+        self._csr_read_req_queue  = CocotbQueue()
+        # stdlib Queue for the response: TCP thread busy-waits on it (time.sleep(0))
+        self._csr_read_resp_queue = _stdlib_queue.Queue()
+
+    # ------------------------------------------------------------------
+    # setup
+    # ------------------------------------------------------------------
+
+    def _register_dma_memory(self) -> None:
+        ram_ranges = parse_iomem_system_ram()
+        if ram_ranges is None:
+            self.log.warning(
+                "System RAM 地址不可读（需 sudo 运行）；DMA 内存区域不注册到 RootComplex。"
+            )
+            return
+        if not ram_ranges:
+            self.log.warning("/proc/iomem 未找到 System RAM；跳过 DMA 区域注册。")
+            return
+
+        self._dma_proxy = PcieDmaRegionProxy(
+            size=2**64,
+            tcp_host=self._dma_tcp_host,
+            tcp_port=self._dma_tcp_port,
+            channel_id=self._dma_channel_id,
+        )
+        for base, size in ram_ranges:
+            # Register the proxy directly with offset=None so AddressSpace passes the
+            # absolute physical address straight to PcieDmaRegionProxy.read().
+            # Using create_window() causes register_region() to overwrite window._parent
+            # with the AddressSpace itself, producing infinite recursion:
+            # AddressSpace.read → Window._read → AddressSpace.read → …
+            self.rc.mem_address_space.register_region(self._dma_proxy, base, size, offset=None)
+            self._dma_windows.append((base, size, None))
+            self.log.info(
+                "DMA 区域注册：0x%x – 0x%x（大小 0x%x）", base, base + size - 1, size
+            )
+
+    async def setup(self) -> None:
+        """
+        1. Register host System RAM as DMA windows in RootComplex.
+        2. Connect RTilePcieDevice to RootComplex.
+        3. Enumerate the PCIe bus.
+        4. Enable device and cache BAR0 window.
+        5. Start async CSR dispatch tasks.
+        6. Start TCP CSR server (UserspaceDriverServer thread).
+        """
+        self._register_dma_memory()
+        self.rc.make_port().connect(self.dev)
+        await self.rc.enumerate()
+
+        pcie_dev = self.rc.find_device(self.dev.functions[0].pcie_id)
+        await pcie_dev.enable_device()
+        await pcie_dev.set_master()
+        self._bar = pcie_dev.bar_window[0]
+        self.log.info("PCIe enumeration done, BAR0 window acquired")
+
+        cocotb.start_soon(self._csr_write_task())
+        cocotb.start_soon(self._csr_read_task())
+
+        self._csr_server = UserspaceDriverServer(
+            self._csr_listen_addr,
+            self._csr_listen_port,
+            csr_write_cb=self._csr_write_cb,
+            csr_read_cb=self._csr_read_cb,
+        )
+        self._csr_server.run()
+        self.log.info(
+            f"CSR TCP server listening on {self._csr_listen_addr}:{self._csr_listen_port}"
+        )
+
+    def stop(self) -> None:
+        """Stop the TCP CSR server thread (call in test teardown)."""
+        if self._csr_server is not None:
+            self._csr_server.stop()
+
+    # ------------------------------------------------------------------
+    # Sync callbacks — called from the TCP server thread
+    # ------------------------------------------------------------------
+
+    def _csr_write_cb(self, addr: int, value: int) -> None:
+        self.log.info(f"CSR write  addr={hex(addr)}  value={hex(value)}")
+        self._csr_write_queue.put_nowait((addr, value))
+
+    def _csr_read_cb(self, addr: int) -> int:
+        self.log.info(f"CSR read   addr={hex(addr)}")
+        self._csr_read_req_queue.put_nowait(addr)
+        while self._csr_read_resp_queue.empty():
+            time.sleep(0)
+        value = self._csr_read_resp_queue.get_nowait()
+        self.log.info(f"CSR read   addr={hex(addr)}  → {hex(value)}")
+        return value
+
+    # ------------------------------------------------------------------
+    # Async dispatch tasks — run in cocotb scheduler
+    # ------------------------------------------------------------------
+
+    async def _csr_write_task(self) -> None:
+        while True:
+            addr, value = await self._csr_write_queue.get()
+            await RisingEdge(self.clock)  # ← 添加：等待时钟边沿 
+            await self._bar.write(addr, value.to_bytes(4, "little"))
+
+    async def _csr_read_task(self) -> None:
+        while True:
+            addr = await self._csr_read_req_queue.get()
+            data = await self._bar.read(addr, 4)
+            self._csr_read_resp_queue.put_nowait(int.from_bytes(data, "little"))
+            await RisingEdge(self.clock)  # ← 添加：等待时钟边沿 
+

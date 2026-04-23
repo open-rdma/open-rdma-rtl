@@ -57,6 +57,7 @@ interface BsvTop;
 endinterface
 
 
+(* synthesize *)
 module mkBsvTop#(
         Clock ftileClk,
         Reset ftileRst,

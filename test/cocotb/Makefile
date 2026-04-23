@@ -16,6 +16,8 @@ TOP_MODULE = mkBsvTopWithoutHardIpInstance
 LOOPBACK_TB_FILE = tb_top_for_system_test.py
 TWO_CARD_TB_FILE = tb_top_for_system_test_two_card.py
 MULTI_NODE_TB_FILE = tb_top_for_system_test_multi_node.py
+PCIE_TB_FILE = tb_top_pcie_system_test.py
+PCIE_TOP_MODULE = mkBsvTop
 
 INST_ID ?= 1
 
@@ -108,6 +110,23 @@ run_system_test_multi_node:
 
 	set -o pipefail ; \
 	COCOTB_VERILOG_DIR=$(SRC_DIR)/verilog:$(GENERATED_VSRC_DIR) COCOTB_DUT=$(TOP_MODULE) BLUERDMA_SIMULATOR_INST_ID=$(INST_ID) BLUERDMA_DATA_BUS_WIDTH=$(BLUERDMA_DATA_BUS_WIDTH) python3 $(MULTI_NODE_TB_FILE) 2>&1 | tee $(LOG_FILE).$(INST_ID)
+
+PCIE_LOG_FILE = $(TB_DIR)/log/$(DATE)_$(PCIE_TOP_MODULE).log
+
+run_pcie_system_test:
+	cd $(TB_DIR)
+	mkdir -p log
+
+	set -o pipefail ; \
+	sudo env \
+		PATH="$(PATH)" \
+		HOME="$(HOME)" \
+		LD_LIBRARY_PATH="$(LD_LIBRARY_PATH)" \
+		COCOTB_VERILOG_DIR=$(SRC_DIR)/verilog:$(GENERATED_VSRC_DIR) \
+		COCOTB_DUT=$(PCIE_TOP_MODULE) \
+		BLUERDMA_SIMULATOR_INST_ID=1 \
+		BLUERDMA_DATA_BUS_WIDTH=$(BLUERDMA_DATA_BUS_WIDTH) \
+		python3 $(PCIE_TB_FILE) 2>&1 | tee $(PCIE_LOG_FILE)
 
 # Compile Verilator without running full tests
 # Usage: make compile_verilator [TOP_MODULE=<module_name>] [BLUERDMA_DATA_BUS_WIDTH=<width>]

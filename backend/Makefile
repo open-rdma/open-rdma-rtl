@@ -186,7 +186,9 @@ verilog: compile
 	bluetcl listVlogFiles.tcl -bdir $(BUILDDIR) -vdir $(BUILDDIR) $(BSV_TOP_MODULE) $(BSV_TOP_MODULE) | grep -i '\.v' | xargs -I {} cp {} $(DIR_BSV_GENERATED)
 	python3 ./reset_tree_wrapper.py ./verilog/mkSqGroup.v
 	python3 ./reset_tree_wrapper.py ./verilog/mkRqGroup.v
-	python3 ./reset_tree_wrapper.py ./verilog/mkBsvTopOnlyHardIp.v
+	# mkBsvTopOnlyHardIp contains RTile HIP primitives; bluetcl may not copy it automatically
+	test -f $(BUILDDIR)/mkBsvTopOnlyHardIp.v && cp $(BUILDDIR)/mkBsvTopOnlyHardIp.v $(DIR_BSV_GENERATED)/ || true
+	test -f ./verilog/mkBsvTopOnlyHardIp.v && python3 ./reset_tree_wrapper.py ./verilog/mkBsvTopOnlyHardIp.v || true
 	python3 ./apply_reset_signal_patch.py ./verilog
 
 vivado:

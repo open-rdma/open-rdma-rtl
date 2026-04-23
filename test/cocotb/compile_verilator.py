@@ -52,10 +52,11 @@ def compile_verilator():
         compile_args=[
             "--no-timing",
             "--Wno-WIDTHTRUNC",
+            "--Wno-WIDTHEXPAND",
             "--Wno-CASEINCOMPLETE",
             "--Wno-INITIALDLY",
             "-Wno-STMTDLY",
-            "--autoflush"
+            "--autoflush",
         ],
         make_args=[f"-j{os.cpu_count() or 4}"],
         python_search=[tests_dir],
