@@ -2,35 +2,15 @@
 """
 tb_top_pcie_system_test.py
 ==========================
-Cocotb testbench for mkBsvTop — the full BSV top module including the
-Intel R-Tile PCIe hard IP interface.
+Cocotb testbench for a lightweight wrapper around mkBsvTop.
 
-Key differences from tb_top_for_system_test.py
------------------------------------------------
-* DUT       : mkBsvTop  (not mkBsvTopWithoutHardIpInstance)
-* Clock     : driven by RTilePcieDevice via coreclkout_hip = dut.CLK
-              → do NOT call Clock(dut.CLK, …) here
-* Reset     : RTilePcieDevice drives dut.RST_N (reset_status_n);
-              dut.RST_N_partitionReset is released simultaneously with RST_N
-              by _partition_reset_task (see note on reset timing below)
-* DMA / PCIe: BsvTopTestBed  (RTilePcieDevice + RootComplex BAR MMIO)
-              replaces SimplePcieBehaviorModelProxy + shared memory
-* CSR access: TCP JSON server on port 7701 → RC BAR MMIO (via BsvTopTestBed)
+The outer DUT only contains:
+  - rtile_reset_output_buffer
+  - mkBsvTop (instance name: u_bsv_top)
 
-Reset timing note
------------------
-In hardware, RST_N_partitionReset (short, 4-cycle buffer) is released 3 cycles
-before RST_N (long, 7-cycle buffer).  Each partition module (mkSqGroup,
-mkRqGroup, mkBsvTopOnlyHardIp) is wrapped by reset_tree_wrapper.py, which adds
-a 3-stage register chain, so partition-internal logic exits reset at
-  T(RST_N_partitionReset_high) + 3 == T(RST_N_high)
-i.e. at the same cycle as the rest of the chip.
-
-In simulation RTilePcieDevice drives RST_N and we cannot predict its rising
-edge, so _partition_reset_task releases RST_N_partitionReset simultaneously
-with RST_N.  The 3-cycle wrapper delay still applies, meaning partition
-internals exit reset 3 cycles AFTER RST_N goes high.  setup() compensates by
-waiting those 3 extra clock cycles before declaring the DUT ready.
+RTilePcieDevice drives the wrapper top-level PCIe raw interface and reset
+source.  The wrapper exposes the buffered reset signals so the test can observe
+the real reset chain instead of mirroring RST_N_partitionReset in Python.
 """
 
 import gc
@@ -53,21 +33,21 @@ from test_framework.eth_bfm import SimpleEthBehaviorModel
 
 class TB:
     def __init__(self, dut):
-        self.dut = dut
+        self.outer_dut = dut
         self.log = logging.getLogger("cocotb.tb")
         self.log.setLevel(logging.DEBUG)
 
-        # dut.CLK is driven by RTilePcieDevice — do not drive it here.
-        self.clock  = dut.CLK
-        self.resetn = dut.RST_N
+        # outer_dut.CLK is driven by RTilePcieDevice and fed into u_bsv_top.
+        self.clock = self.outer_dut.CLK
+        self.resetn = self.outer_dut.RST_N_buffered_long
 
         # Root Complex (PCIe host side)
         self.rc = BsvRootComplex()
 
         # BsvTopTestBed: wraps RTilePcieDevice + RC + TCP CSR server.
-        # RTilePcieDevice will drive dut.CLK (500 MHz) and dut.RST_N.
+        # The PCIe model drives the wrapper top-level clock/reset and raw buses.
         self.pcie_tb = BsvTopTestBed(
-            dut,
+            self.outer_dut,
             self.rc,
             csr_listen_addr="0.0.0.0",
             csr_listen_port=7701,
@@ -90,31 +70,35 @@ class TB:
         #     ],
         # )
 
-        # Mirror dut.RST_N → dut.RST_N_partitionReset
-        # RST_N is driven by RTilePcieDevice; we follow it here.
-        cocotb.start_soon(self._partition_reset_task())
-
     async def setup(self):
         """
         Enumerate PCIe bus, start CSR TCP server, wait for reset release.
         Must be awaited at the start of every test coroutine.
         """
-        # setup() connects dev to rc, enumerates, acquires BAR, starts TCP server
-        await self.pcie_tb.setup()
+        # Connect the simulated device to the RC first.  Delay enumeration until
+        # the wrapper reset chain has fully released.
+        self.pcie_tb.prepare()
 
-        # Wait for RTilePcieDevice to release reset (de-assert → 1)
-        await RisingEdge(self.resetn)
-        self.log.info("dut.RST_N released")
+        # Wait for the real reset chain to release:
+        # short buffered reset first, then the long reset seen by mkBsvTop.
+        if not self.outer_dut.RST_N_partitionReset.value:
+            await RisingEdge(self.outer_dut.RST_N_partitionReset)
+        self.log.info("dut.RST_N_partitionReset released")
 
-        # RST_N_partitionReset was released simultaneously with RST_N (see
-        # _partition_reset_task).  reset_tree_wrapper.py inserts a 3-stage
-        # register chain at the boundary of each partition module, so
-        # partition-internal logic (mkSqGroup, mkRqGroup, mkBsvTopOnlyHardIp)
-        # exits reset 3 cycles after RST_N_partitionReset goes high.  Wait
-        # those 3 cycles before sending any traffic.
+        if not self.resetn.value:
+            await RisingEdge(self.resetn)
+        self.log.info("dut.RST_N_buffered_long released")
+
+        # reset_tree_wrapper.py inserts a 3-stage register chain at the boundary
+        # of each partition module, so partition-internal logic exits reset
+        # 3 cycles after RST_N_partitionReset goes high.
         for _ in range(3):
             await RisingEdge(self.clock)
         self.log.info("partition reset propagated — DUT fully out of reset")
+
+        # With the DUT now out of reset, it is safe to enumerate the PCIe bus
+        # and expose BAR0/CSR services to the userspace driver.
+        await self.pcie_tb.enumerate_and_start()
 
     # async def start_single_card_loop_back(self):
     #     """Forward every Ethernet TX packet back as RX (single-card loopback)."""
@@ -129,34 +113,6 @@ class TB:
     def clean_up(self):
         """Stop the TCP CSR server. Call at end of each test."""
         self.pcie_tb.stop()
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    async def _partition_reset_task(self):
-        """
-        Assert and release dut.RST_N_partitionReset in sync with dut.RST_N.
-
-        In hardware RST_N_partitionReset is a 4-cycle-buffered version of the
-        rtile reset and goes high 3 cycles before RST_N (7-cycle buffer).
-        Here we release both simultaneously because RTilePcieDevice controls
-        RST_N and we cannot predict its rising edge.  The 3-cycle discrepancy
-        is absorbed by the 3 extra clock cycles that setup() waits after
-        RisingEdge(resetn).
-        """
-        if not hasattr(self.dut, "RST_N_partitionReset"):
-            return
-
-        self.dut.RST_N_partitionReset.value = 0
-        self.log.info("RST_N_partitionReset asserted")
-
-        # Release simultaneously with RST_N; setup() waits 3 more cycles for
-        # the reset_tree_wrapper 3-stage pipeline to drain.
-        await RisingEdge(self.resetn)
-
-        self.dut.RST_N_partitionReset.value = 1
-        self.log.info("RST_N_partitionReset released")
 
     async def _wait_for_ftile_clk(self):
         """
@@ -204,7 +160,7 @@ async def small_desc_fp_test(dut):
 
 def test_bsv_top_pcie():
     rtl_dirs  = os.getenv("COCOTB_VERILOG_DIR") or ""
-    dut_name  = os.getenv("COCOTB_DUT") or "mkBsvTop"
+    dut_name  = os.getenv("COCOTB_DUT") or "top_mkBsvTopWithResetBuffer"
     tests_dir = os.path.dirname(__file__)
     module    = os.path.splitext(os.path.basename(__file__))[0]
 

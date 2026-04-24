@@ -436,7 +436,6 @@ def create_bsv_rtile_pcie_dev(
         coreclkout_hip=dut.CLK,
 
         # The model drives dut.RST_N low during reset and high after link-up.
-        # This corresponds to rtile_pcie_p0_reset_status_n_buffered_long in HW.
         reset_status_n=dut.RST_N,
 
         # PCIe PERST# input. None → model auto-releases reset internally.
@@ -630,17 +629,19 @@ class BsvTopTestBed:
                 "DMA 区域注册：0x%x – 0x%x（大小 0x%x）", base, base + size - 1, size
             )
 
-    async def setup(self) -> None:
+    def prepare(self) -> None:
         """
-        1. Register host System RAM as DMA windows in RootComplex.
-        2. Connect RTilePcieDevice to RootComplex.
-        3. Enumerate the PCIe bus.
-        4. Enable device and cache BAR0 window.
-        5. Start async CSR dispatch tasks.
-        6. Start TCP CSR server (UserspaceDriverServer thread).
+        Register host DMA memory and connect the simulated PCIe device to the
+        RootComplex, but do not enumerate yet.
         """
         self._register_dma_memory()
         self.rc.make_port().connect(self.dev)
+
+    async def enumerate_and_start(self) -> None:
+        """
+        Enumerate the PCIe bus, enable BAR access, and start CSR services.
+        Call this only after the DUT reset chain has fully released.
+        """
         await self.rc.enumerate()
 
         pcie_dev = self.rc.find_device(self.dev.functions[0].pcie_id)
@@ -662,6 +663,19 @@ class BsvTopTestBed:
         self.log.info(
             f"CSR TCP server listening on {self._csr_listen_addr}:{self._csr_listen_port}"
         )
+
+    async def setup(self) -> None:
+        """
+        Backward-compatible one-shot initialization:
+        1. Register host System RAM as DMA windows in RootComplex.
+        2. Connect RTilePcieDevice to RootComplex.
+        3. Enumerate the PCIe bus.
+        4. Enable device and cache BAR0 window.
+        5. Start async CSR dispatch tasks.
+        6. Start TCP CSR server (UserspaceDriverServer thread).
+        """
+        self.prepare()
+        await self.enumerate_and_start()
 
     def stop(self) -> None:
         """Stop the TCP CSR server thread (call in test teardown)."""
@@ -701,4 +715,3 @@ class BsvTopTestBed:
             data = await self._bar.read(addr, 4)
             self._csr_read_resp_queue.put_nowait(int.from_bytes(data, "little"))
             await RisingEdge(self.clock)  # ← 添加：等待时钟边沿 
-

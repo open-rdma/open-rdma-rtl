@@ -4,6 +4,8 @@ ROOT_DIR = $(abspath ../../)
 BACKEND_DIR = $(ROOT_DIR)/backend
 SRC_DIR = $(ROOT_DIR)/src
 TB_DIR = $(abspath ./)
+PCIE_WRAPPER_DIR = $(TB_DIR)/verilog
+QUARTUS_RTL_DIR = $(BACKEND_DIR)/quartus/rtl
 include $(ROOT_DIR)/Makefile.base
 VBUILD_DIR = $(BACKEND_DIR)/build
 GENERATED_VSRC_DIR = $(BACKEND_DIR)/verilog
@@ -17,7 +19,7 @@ LOOPBACK_TB_FILE = tb_top_for_system_test.py
 TWO_CARD_TB_FILE = tb_top_for_system_test_two_card.py
 MULTI_NODE_TB_FILE = tb_top_for_system_test_multi_node.py
 PCIE_TB_FILE = tb_top_pcie_system_test.py
-PCIE_TOP_MODULE = mkBsvTop
+PCIE_TOP_MODULE = top_mkBsvTopWithResetBuffer
 
 INST_ID ?= 1
 
@@ -122,7 +124,7 @@ run_pcie_system_test:
 		PATH="$(PATH)" \
 		HOME="$(HOME)" \
 		LD_LIBRARY_PATH="$(LD_LIBRARY_PATH)" \
-		COCOTB_VERILOG_DIR=$(SRC_DIR)/verilog:$(GENERATED_VSRC_DIR) \
+		COCOTB_VERILOG_DIR=$(PCIE_WRAPPER_DIR):$(QUARTUS_RTL_DIR):$(SRC_DIR)/verilog:$(GENERATED_VSRC_DIR) \
 		COCOTB_DUT=$(PCIE_TOP_MODULE) \
 		BLUERDMA_SIMULATOR_INST_ID=1 \
 		BLUERDMA_DATA_BUS_WIDTH=$(BLUERDMA_DATA_BUS_WIDTH) \
