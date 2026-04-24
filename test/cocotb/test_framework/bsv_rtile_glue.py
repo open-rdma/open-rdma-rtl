@@ -85,7 +85,6 @@ owns that clock):
 
 import logging
 import queue as _stdlib_queue
-import time
 from typing import Optional
 
 import cocotb
@@ -589,12 +588,10 @@ class BsvTopTestBed:
         self._dma_proxy:   Optional[PcieDmaRegionProxy] = None
         self._dma_windows: list = []
 
-        # Queue bridge: sync TCP thread ↔ cocotb scheduler
-        # CocotbQueue supports put_nowait() from threads and await get() in coroutines.
-        self._csr_write_queue     = CocotbQueue()
-        self._csr_read_req_queue  = CocotbQueue()
-        # stdlib Queue for the response: TCP thread busy-waits on it (time.sleep(0))
-        self._csr_read_resp_queue = _stdlib_queue.Queue()
+        # Single in-order bridge: TCP thread enqueues CSR ops here, and one
+        # cocotb coroutine serializes all BAR accesses to preserve write/read
+        # ordering exactly as requests arrive from the userspace driver.
+        self._csr_req_queue = CocotbQueue()
 
     # ------------------------------------------------------------------
     # setup
@@ -650,8 +647,7 @@ class BsvTopTestBed:
         self._bar = pcie_dev.bar_window[0]
         self.log.info("PCIe enumeration done, BAR0 window acquired")
 
-        cocotb.start_soon(self._csr_write_task())
-        cocotb.start_soon(self._csr_read_task())
+        cocotb.start_soon(self._csr_dispatch_task())
 
         self._csr_server = UserspaceDriverServer(
             self._csr_listen_addr,
@@ -688,14 +684,21 @@ class BsvTopTestBed:
 
     def _csr_write_cb(self, addr: int, value: int) -> None:
         self.log.info(f"CSR write  addr={hex(addr)}  value={hex(value)}")
-        self._csr_write_queue.put_nowait((addr, value))
+        self._csr_req_queue.put_nowait(("write", addr, value, None))
 
     def _csr_read_cb(self, addr: int) -> int:
         self.log.info(f"CSR read   addr={hex(addr)}")
-        self._csr_read_req_queue.put_nowait(addr)
-        while self._csr_read_resp_queue.empty():
-            time.sleep(0)
-        value = self._csr_read_resp_queue.get_nowait()
+        response_queue = _stdlib_queue.Queue(maxsize=1)
+        self._csr_req_queue.put_nowait(("read", addr, None, response_queue))
+        while True:
+            try:
+                value = response_queue.get(timeout=5.0)
+                break
+            except _stdlib_queue.Empty:
+                self.log.warning(
+                    "CSR read still waiting after 5.0s: addr=%s",
+                    hex(addr),
+                )
         self.log.info(f"CSR read   addr={hex(addr)}  → {hex(value)}")
         return value
 
@@ -703,15 +706,15 @@ class BsvTopTestBed:
     # Async dispatch tasks — run in cocotb scheduler
     # ------------------------------------------------------------------
 
-    async def _csr_write_task(self) -> None:
+    async def _csr_dispatch_task(self) -> None:
         while True:
-            addr, value = await self._csr_write_queue.get()
-            await RisingEdge(self.clock)  # ← 添加：等待时钟边沿 
-            await self._bar.write(addr, value.to_bytes(4, "little"))
+            op, addr, value, response_queue = await self._csr_req_queue.get()
+            await RisingEdge(self.clock)
 
-    async def _csr_read_task(self) -> None:
-        while True:
-            addr = await self._csr_read_req_queue.get()
-            data = await self._bar.read(addr, 4)
-            self._csr_read_resp_queue.put_nowait(int.from_bytes(data, "little"))
-            await RisingEdge(self.clock)  # ← 添加：等待时钟边沿 
+            if op == "write":
+                await self._bar.write(addr, value.to_bytes(4, "little"))
+            elif op == "read":
+                data = await self._bar.read(addr, 4)
+                response_queue.put_nowait(int.from_bytes(data, "little"))
+            else:
+                raise RuntimeError(f"Unknown CSR op: {op}")
