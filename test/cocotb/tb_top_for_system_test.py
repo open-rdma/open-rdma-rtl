@@ -3,9 +3,6 @@ import itertools
 import gc
 import logging
 import os
-import threading
-
-import time
 
 import cocotb_test.simulator
 import pytest
@@ -39,10 +36,7 @@ class TB(object):
 
         self.shared_mem = open_shared_mem_to_hw_simulator(256*1024*1024)
 
-        self.csr_write_req_queue = Queue()
-        self.csr_read_req_queue = Queue()
-        self.csr_read_resp_queue = Queue()
-        self.csr_read_lock = threading.Lock()
+        self.csr_req_queue = Queue()
 
         self.rpc_server = UserspaceDriverServer(
             "0.0.0.0", 7701, self._csr_write_cb, self._csr_read_cb)
@@ -76,8 +70,7 @@ class TB(object):
             ],
         )
 
-        cocotb.start_soon(self._forward_csr_write_task())
-        cocotb.start_soon(self._forward_csr_read_req_task())
+        cocotb.start_soon(self._csr_dispatch_task())
 
     async def start_single_card_loop_back(self):
         async def _loop_back_task(self):
@@ -99,32 +92,37 @@ class TB(object):
         gc.collect()
         shared_mem.close()
 
+    # TODO 这一段逻辑在很多文件中重复了，可以考虑抽象成一个公共的基类或者工具函数
     def _csr_write_cb(self, addr, value):
         self.log.info(f"write CSR, addr={hex(addr)}, value={hex(value)}\n\n")
-        self.csr_write_req_queue.put_nowait((addr, value))
+        self.csr_req_queue.put_nowait(("write", addr, value, None))
         self.log.info(
             f"get mem addr @ 0x3e01000={self.shared_mem.buf[0x3e01000]}")
 
     def _csr_read_cb(self, addr):
-        with self.csr_read_lock:
-            self.csr_read_req_queue.put_nowait(addr)
-            while self.csr_read_resp_queue.empty():
-                time.sleep(0)
-            return self.csr_read_resp_queue.get_nowait()
-
-    async def _forward_csr_write_task(self):
+        import queue as _stdlib_queue
+        response_queue = _stdlib_queue.Queue(maxsize=1)
+        self.csr_req_queue.put_nowait(("read", addr, None, response_queue))
         while True:
-            addr, value = await self.csr_write_req_queue.get()
-            await RisingEdge(self.clock)  # ← 添加：等待时钟边沿 
-            await self.pcie_bfm.host_write_blocking(addr, value)
-            self.log.info(f"_forward_csr_write_task: {addr, value}")
+            try:
+                return response_queue.get(timeout=5.0)
+            except _stdlib_queue.Empty:
+                self.log.warning("CSR read still waiting after 5.0s: addr=%s", hex(addr))
 
-    async def _forward_csr_read_req_task(self):
+    async def _csr_dispatch_task(self):
         while True:
-            addr = await self.csr_read_req_queue.get()
-            await RisingEdge(self.clock)  # ← 添加：等待时钟边沿 
-            val = await self.pcie_bfm.host_read_blocking(addr)
-            await self.csr_read_resp_queue.put(val)
+            op, addr, value, response_queue = await self.csr_req_queue.get()
+            await RisingEdge(self.clock)
+
+            if op == "write":
+                await self.pcie_bfm.host_write_blocking(addr, value)
+                self.log.info(f"_csr_dispatch_task write: {(addr, value)}")
+            elif op == "read":
+                val = await self.pcie_bfm.host_read_blocking(addr)
+                response_queue.put_nowait(val)
+                self.log.info(f"_csr_dispatch_task read: {(addr, val)}")
+            else:
+                raise RuntimeError(f"Unknown CSR op: {op}")
 
     async def put_rx_data(self, packet_data):
         await self.eth_bfm.inject_rx_packet(packet_data)
@@ -180,7 +178,15 @@ def test_top_without_hard_ip():
     cocotb_test.simulator.run(
         # 需要编译，但是可以大幅加速运行速度
         "verilator",
-        compile_args=["--no-timing", "--Wno-WIDTHTRUNC", "--Wno-CASEINCOMPLETE", "--Wno-INITIALDLY", "-Wno-STMTDLY", "--autoflush" ],
+        compile_args=[
+            "--no-timing",
+            "--Wno-WIDTHTRUNC",
+            "--Wno-WIDTHEXPAND",
+            "--Wno-CASEINCOMPLETE",
+            "--Wno-INITIALDLY",
+            "-Wno-STMTDLY",
+            "--autoflush",
+        ],
         make_args=[f"-j{os.cpu_count() or 4}"],
 
 

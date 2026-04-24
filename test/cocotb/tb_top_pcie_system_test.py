@@ -136,6 +136,8 @@ async def small_desc_fp_test(dut):
     """
     tb = TB(dut)
 
+    # logging.getLogger("cocotb.pcie").setLevel(logging.DEBUG)
+
     # Drive the ftile Ethernet clock (CLK_ftileClk).
     # For a basic PCIe-only test, tie it to dut.CLK so the BSV scheduler
     # doesn't stall waiting for the clock domain.
