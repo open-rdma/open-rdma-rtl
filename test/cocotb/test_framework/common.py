@@ -5,6 +5,7 @@ from collections import deque, OrderedDict
 from abc import ABC
 import logging
 import math
+import cocotb_test.simulator
 from .hw_consts import MEM_REGION_PAGE_SIZE, LR_KEY_IDX_PART_WIDTH, LR_KEY_KEY_PART_WIDTH, QPN_IDX_PART_WIDTH, QPN_KEY_PART_WIDTH
 import asyncio
 import find_libpython
@@ -21,6 +22,14 @@ def gen_rtl_file_list(top_paths):
     fileset = set()
     filelist = []
     for top_path in top_paths.split(":"):
+        if not top_path:
+            continue
+        if os.path.isfile(top_path):
+            filename = os.path.basename(top_path)
+            if (filename.endswith(".v") or filename.endswith(".sv")) and filename not in fileset:
+                filelist.append(top_path)
+                fileset.add(filename)
+            continue
         for (dirpath, dirnames, filenames) in os.walk(top_path):
             for filename in filenames:
                 if filename.endswith(".v") or filename.endswith(".sv"):
@@ -31,7 +40,10 @@ def gen_rtl_file_list(top_paths):
 
 
 def copy_mem_file_to_sim_build_dir(src_dirs, target_dir):
+    os.makedirs(target_dir, exist_ok=True)
     for top_path in src_dirs.split(":"):
+        if not top_path or os.path.isfile(top_path):
+            continue
         for (dirpath, dirnames, filenames) in os.walk(top_path):
             for filename in filenames:
                 if filename.endswith(".bin") or filename.endswith(".hex"):
@@ -53,6 +65,58 @@ def cocotb_extra_env():
         )
 
     return env
+
+
+def run_cocotb_simulation(
+    *,
+    tests_dir,
+    module,
+    dut_name,
+    rtl_dirs,
+    sim_build_suffix=None,
+    waves=True,
+):
+    simulator = os.getenv("BLUERDMA_SIM_BACKEND", "verilator")
+    supported_simulators = {"verilator", "iverilog"}
+    if simulator not in supported_simulators:
+        raise ValueError(
+            "Unsupported BLUERDMA_SIM_BACKEND value "
+            f"{simulator!r}; expected one of {sorted(supported_simulators)}"
+        )
+
+    verilog_sources = gen_rtl_file_list(rtl_dirs)
+    sim_build = os.path.join(
+        tests_dir,
+        "sim_build",
+        sim_build_suffix or dut_name,
+    )
+    copy_mem_file_to_sim_build_dir(rtl_dirs, sim_build)
+
+    run_kwargs = {
+        "simulator": simulator,
+        "python_search": [tests_dir],
+        "verilog_sources": verilog_sources,
+        "toplevel": dut_name,
+        "module": module,
+        "extra_env": cocotb_extra_env(),
+        "timescale": "1ns/1ps",
+        "sim_build": sim_build,
+        "waves": waves,
+    }
+
+    if simulator == "verilator":
+        run_kwargs["compile_args"] = [
+            "--no-timing",
+            "--Wno-WIDTHTRUNC",
+            "--Wno-WIDTHEXPAND",
+            "--Wno-CASEINCOMPLETE",
+            "--Wno-INITIALDLY",
+            "-Wno-STMTDLY",
+            "--autoflush",
+        ]
+        run_kwargs["make_args"] = [f"-j{os.cpu_count() or 4}"]
+
+    cocotb_test.simulator.run(**run_kwargs)
 
 
 class BluespecValueMethod:

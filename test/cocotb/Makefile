@@ -6,6 +6,7 @@ SRC_DIR = $(ROOT_DIR)/src
 TB_DIR = $(abspath ./)
 PCIE_WRAPPER_DIR = $(TB_DIR)/verilog
 QUARTUS_RTL_DIR = $(BACKEND_DIR)/quartus/rtl
+PCIE_RESET_RTL = $(QUARTUS_RTL_DIR)/rtile_reset_output_buffer.v
 include $(ROOT_DIR)/Makefile.base
 VBUILD_DIR = $(BACKEND_DIR)/build
 GENERATED_VSRC_DIR = $(BACKEND_DIR)/verilog
@@ -26,7 +27,7 @@ INST_ID ?= 1
 PYTHON ?= python3
 
 COMMON_VERILOG_DIR = $(SRC_DIR)/verilog:$(GENERATED_VSRC_DIR)
-PCIE_VERILOG_DIR = $(PCIE_WRAPPER_DIR):$(QUARTUS_RTL_DIR):$(COMMON_VERILOG_DIR)
+PCIE_VERILOG_DIR = $(PCIE_WRAPPER_DIR):$(PCIE_RESET_RTL):$(COMMON_VERILOG_DIR)
 
 ifeq ($(TOP_MODULE),$(PCIE_TOP_MODULE))
 COMPILE_VERILOG_DIR = $(PCIE_VERILOG_DIR)
@@ -160,3 +161,4 @@ clean:
 	cd $(BACKEND_DIR) && make clean
 	cd $(TB_DIR) && rm -rf $(VLOG_FILE) __pycache__ .pytest_cache sim_build *.log 
 	
+.PHONY: verilog prepare run clean compile_verilator

@@ -4,7 +4,6 @@ import gc
 import logging
 import os
 
-import cocotb_test.simulator
 import pytest
 
 import cocotb
@@ -16,7 +15,7 @@ from cocotb.queue import Queue
 from test_framework.mock_host import UserspaceDriverServer, open_shared_mem_to_hw_simulator
 
 
-from test_framework.common import cocotb_extra_env, gen_rtl_file_list, copy_mem_file_to_sim_build_dir
+from test_framework.common import run_cocotb_simulation
 from test_framework.eth_bfm import SimpleEthBehaviorModel
 from test_framework.pcie_bfm import SimplePcieBehaviorModel
 from test_framework.proxy_pcie_bfm import SimplePcieBehaviorModelProxy
@@ -165,39 +164,14 @@ async def small_desc_fp_test(dut):
 
 def test_top_without_hard_ip():
     rtl_dirs = os.getenv("COCOTB_VERILOG_DIR") or ""
-    dut = os.getenv("COCOTB_DUT") or ""
+    dut = os.getenv("COCOTB_DUT") or "mkBsvTopWithoutHardIpInstance"
     tests_dir = os.path.dirname(__file__)
     module = os.path.splitext(os.path.basename(__file__))[0]
-    toplevel = dut
-
-    verilog_sources = gen_rtl_file_list(rtl_dirs)
-
-    sim_build = os.path.join(tests_dir, "sim_build", dut)
-    copy_mem_file_to_sim_build_dir(rtl_dirs, sim_build)
-
-    cocotb_test.simulator.run(
-        # 需要编译，但是可以大幅加速运行速度
-        "verilator",
-        compile_args=[
-            "--no-timing",
-            "--Wno-WIDTHTRUNC",
-            "--Wno-WIDTHEXPAND",
-            "--Wno-CASEINCOMPLETE",
-            "--Wno-INITIALDLY",
-            "-Wno-STMTDLY",
-            "--autoflush",
-        ],
-        make_args=[f"-j{os.cpu_count() or 4}"],
-
-
-        python_search=[tests_dir],
-        verilog_sources=verilog_sources,
-        toplevel=toplevel,
+    run_cocotb_simulation(
+        tests_dir=tests_dir,
         module=module,
-        extra_env=cocotb_extra_env(),
-        timescale="1ns/1ps",
-        sim_build=sim_build,
-        waves=True,
+        dut_name=dut,
+        rtl_dirs=rtl_dirs,
     )
 
 
