@@ -145,6 +145,27 @@ TARGETFILE ?= ../src/Top.bsv
 BSV_TOP_MODULE ?= mkBsvTop
 TOP = bluerdma_top
 
+BSC_SOURCE_FILES := $(shell find $(abspath ../src) $(abspath ../test) -type f -name '*.bsv')
+BACKEND_BUILD_DEPS := $(BACKENDDIR)/Makefile $(BACKENDDIR)/../Makefile.base
+VERILOG_HELPERS := \
+	$(BACKENDDIR)/reset_tree_wrapper.py \
+	$(BACKENDDIR)/apply_reset_signal_patch.py \
+	$(BACKENDDIR)/listVlogFiles.tcl
+BACKEND_CONFIG_VARS := \
+	TARGETFILE \
+	BSV_TOP_MODULE \
+	BLUERDMA_BUILD_TARGET \
+	BLUE_RDMA_DMA_IP_TYPE \
+	BLUE_RDMA_ETH_IP_TYPE \
+	IS_COMPILE_FOR_SIM \
+	BLUERDMA_IMMFAIL_ENABLE_TIME
+BACKEND_CONFIG_RAW := $(foreach v,$(BACKEND_CONFIG_VARS),$(v)=$($(v))|)
+BACKEND_CONFIG_HASH := $(shell printf '%s' '$(BACKEND_CONFIG_RAW)' | sha1sum | cut -c1-12)
+BACKEND_CONFIG_KEY := $(BSV_TOP_MODULE)__$(BLUERDMA_BUILD_TARGET)__$(BACKEND_CONFIG_HASH)
+BACKEND_CONFIG_STAMP := $(BUILDDIR)/.backend_config_$(BACKEND_CONFIG_KEY).stamp
+COMPILE_STAMP := $(BUILDDIR)/.$(BACKEND_CONFIG_KEY).compile.stamp
+VERILOG_STAMP := $(BACKENDDIR)/verilog/.$(BACKEND_CONFIG_KEY).verilog.stamp
+
 
 
 
@@ -175,12 +196,19 @@ ifdef IS_COMPILE_FOR_SIM
 endif
 
 
-compile:
+$(BACKEND_CONFIG_STAMP):
 	mkdir -p $(BUILDDIR)
-	# rm $(BUILDDIR)/FullyPipelineChecker.bo 
-	bsc -elab -verilog -verbose $(BLUESIMFLAGS) $(DEBUGFLAGS) $(DIRFLAGS) $(MISCFLAGS) $(RECOMPILEFLAGS) $(RUNTIMEFLAGS) $(SCHEDFLAGS) $(TRANSFLAGS) -g $(BSV_TOP_MODULE) $(TARGETFILE)
+	touch $@
 
-verilog: compile 
+$(COMPILE_STAMP): $(BSC_SOURCE_FILES) $(BACKEND_BUILD_DEPS) $(BACKEND_CONFIG_STAMP)
+	mkdir -p $(BUILDDIR)
+	# rm $(BUILDDIR)/FullyPipelineChecker.bo
+	bsc -elab -verilog -verbose $(BLUESIMFLAGS) $(DEBUGFLAGS) $(DIRFLAGS) $(MISCFLAGS) $(RECOMPILEFLAGS) $(RUNTIMEFLAGS) $(SCHEDFLAGS) $(TRANSFLAGS) -g $(BSV_TOP_MODULE) $(TARGETFILE)
+	touch $@
+
+compile: $(COMPILE_STAMP)
+
+$(VERILOG_STAMP): $(COMPILE_STAMP) $(VERILOG_HELPERS)
 	mkdir -p $(DIR_BSV_GENERATED)
 	bsc $(VERILOGFLAGS) $(DIRFLAGS) $(MISCFLAGS) $(RECOMPILEFLAGS) $(RUNTIMEFLAGS) $(TRANSFLAGS) -g $(BSV_TOP_MODULE) $(TARGETFILE)
 	bluetcl listVlogFiles.tcl -bdir $(BUILDDIR) -vdir $(BUILDDIR) $(BSV_TOP_MODULE) $(BSV_TOP_MODULE) | grep -i '\.v' | xargs -I {} cp {} $(DIR_BSV_GENERATED)
@@ -190,6 +218,9 @@ verilog: compile
 	test -f $(BUILDDIR)/mkBsvTopOnlyHardIp.v && cp $(BUILDDIR)/mkBsvTopOnlyHardIp.v $(DIR_BSV_GENERATED)/ || true
 	test -f ./verilog/mkBsvTopOnlyHardIp.v && python3 ./reset_tree_wrapper.py ./verilog/mkBsvTopOnlyHardIp.v || true
 	python3 ./apply_reset_signal_patch.py ./verilog
+	touch $@
+
+verilog: $(VERILOG_STAMP)
 
 vivado:
 	cd vivado && \
@@ -206,5 +237,5 @@ quartus:
 clean:
 	rm -rf $(BUILDDIR) $(WORK_DIR) $(DIR_BSV_GENERATED) $(DIR_BSV_GENERATED_STUB) .Xil *.jou *.log
 
-.PHONY: verilog vivado clean quartus
+.PHONY: vivado clean quartus
 .DEFAULT_GOAL := verilog

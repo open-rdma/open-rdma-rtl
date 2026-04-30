@@ -67,6 +67,18 @@ def cocotb_extra_env():
     return env
 
 
+def _immfail_compile_args():
+    """
+    Convert the optional runtime-facing environment knob into a simulator
+    compile-time define that BSV-generated Verilog can consume uniformly.
+    """
+    immfail_enable_time = os.getenv("BLUERDMA_IMMFAIL_ENABLE_TIME")
+    if not immfail_enable_time:
+        return []
+
+    return [f"-DBLUERDMA_IMMFAIL_ENABLE_TIME={immfail_enable_time}"]
+
+
 def run_cocotb_simulation(
     *,
     tests_dir,
@@ -76,7 +88,7 @@ def run_cocotb_simulation(
     sim_build_suffix=None,
     waves=True,
 ):
-    simulator = os.getenv("BLUERDMA_SIM_BACKEND", "verilator")
+    simulator = os.getenv("BLUERDMA_SIM_BACKEND", "verilator") or "verilator"
     supported_simulators = {"verilator", "iverilog"}
     if simulator not in supported_simulators:
         raise ValueError(
@@ -103,6 +115,7 @@ def run_cocotb_simulation(
         "sim_build": sim_build,
         "waves": waves,
     }
+    immfail_compile_args = _immfail_compile_args()
 
     if simulator == "verilator":
         run_kwargs["compile_args"] = [
@@ -113,8 +126,12 @@ def run_cocotb_simulation(
             "--Wno-INITIALDLY",
             "-Wno-STMTDLY",
             "--autoflush",
-        ]
+        ] + immfail_compile_args
         run_kwargs["make_args"] = [f"-j{os.cpu_count() or 4}"]
+    if simulator == "iverilog":
+        run_kwargs["simulator"] = None
+        if immfail_compile_args:
+            run_kwargs["compile_args"] = immfail_compile_args
 
     cocotb_test.simulator.run(**run_kwargs)
 

@@ -10,6 +10,7 @@ from test_framework.common import (
     cocotb_extra_env,
     copy_mem_file_to_sim_build_dir,
     gen_rtl_file_list,
+    run_cocotb_simulation,
 )
 
 
@@ -32,45 +33,18 @@ def compile_verilator():
         sys.exit(1)
 
     tests_dir = os.path.dirname(__file__)
-    sim_build = os.path.join(tests_dir, "sim_build", dut)
 
-    print(f"Compiling {dut} with Verilator...")
-    print(f"RTL directories: {rtl_dirs}")
-    print(f"Build directory: {sim_build}")
-
-    # Generate RTL file list
-    verilog_sources = gen_rtl_file_list(rtl_dirs)
-    print(f"Found {len(verilog_sources)} RTL files")
-
-    # Copy memory initialization files to build directory
-    copy_mem_file_to_sim_build_dir(rtl_dirs, sim_build)
-
+    module = os.path.splitext(os.path.basename(__file__))[0]
     # Run Verilator compilation
     # Note: This will compile and run a minimal empty test to validate the compilation
-    cocotb_test.simulator.run(
-        simulator="verilator",
-        compile_args=[
-            "--no-timing",
-            "--Wno-WIDTHTRUNC",
-            "--Wno-WIDTHEXPAND",
-            "--Wno-CASEINCOMPLETE",
-            "--Wno-INITIALDLY",
-            "-Wno-STMTDLY",
-            "--autoflush",
-        ],
-        make_args=[f"-j{os.cpu_count() or 4}"],
-        python_search=[tests_dir],
-        verilog_sources=verilog_sources,
-        toplevel=dut,
-        module=os.path.splitext(os.path.basename(__file__))[0],
-        extra_env=cocotb_extra_env(),
-        timescale="1ns/1ps",
-        sim_build=sim_build,
-        waves=True,
+    run_cocotb_simulation(
+        tests_dir=tests_dir,
+        module=module,
+        dut_name=dut,
+        rtl_dirs=rtl_dirs,
     )
 
     print(f"\nCompilation completed successfully!")
-    print(f"Build artifacts location: {sim_build}")
 
 
 # Minimal cocotb test that immediately exits (required by cocotb_test)
