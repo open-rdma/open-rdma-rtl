@@ -5,6 +5,9 @@ FLOW ?= default
 TOP_BSV_SRC_FILE ?= ../src/Top.bsv
 INST_ID ?= 1
 PYTHON ?= python3
+# TODO, this constant is related to the cocotb-pcie/rtile reset-release timing model. If the Python-side reset choreography changes, update this fixed Makefile constant in lockstep.
+# unit is ns
+PCIE_IMMFAIL_ENABLE_TIME := 100
 
 # Base paths
 ROOT_DIR := $(abspath ../../)
@@ -37,6 +40,10 @@ SIM_TOP := top_mkBsvTopWithResetBuffer
 TB_FILE ?= $(PCIE_TB_FILE)
 SIM_VERILOG_DIR := $(PCIE_VERILOG_DIR)
 PREPARE_TARGET := $(PCIE_WRAPPER_DIR)/$(SIM_TOP).v
+# TODO: Keep this compile-time threshold aligned with the cocotb-pcie/rtile
+# reset-release timing model. If the Python-side reset choreography changes,
+# update this fixed Makefile constant in lockstep.
+FLOW_VERILOG_MAKE_ARGS := BLUERDMA_IMMFAIL_ENABLE_TIME=$(PCIE_IMMFAIL_ENABLE_TIME)
 else
 FLOW_NAME := default
 BSV_BUILD_TOP := mkBsvTopWithoutHardIpInstance
@@ -44,6 +51,7 @@ SIM_TOP := mkBsvTopWithoutHardIpInstance
 TB_FILE ?= tb_top_without_hard_ip.py
 SIM_VERILOG_DIR := $(COMMON_VERILOG_DIR)
 PREPARE_TARGET := $(GENERATED_VSRC_DIR)/$(SIM_TOP).v
+FLOW_VERILOG_MAKE_ARGS :=
 endif
 
 # Legacy compatibility: TOP_MODULE was the original single-line cocotb test
@@ -101,7 +109,7 @@ LOG_FILE = $(TB_DIR)/log/$(DATE)_$(SIM_TOP).log
 # dependency graph and incrementality.
 #
 verilog:
-	$(MAKE) -C $(BACKEND_DIR) TARGETFILE=$(TOP_BSV_SRC_FILE) BSV_TOP_MODULE=$(BSV_BUILD_TOP) IS_COMPILE_FOR_SIM=True verilog
+	$(MAKE) -C $(BACKEND_DIR) TARGETFILE=$(TOP_BSV_SRC_FILE) BSV_TOP_MODULE=$(BSV_BUILD_TOP) IS_COMPILE_FOR_SIM=True $(FLOW_VERILOG_MAKE_ARGS) verilog
 	test -f $(BACKEND_TOP_V)
 
 prepare: verilog $(SIM_TOP_V)

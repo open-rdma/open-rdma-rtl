@@ -165,7 +165,17 @@ function Action immAssert(Bool condition, String assertName, Fmt assertFmtMsg);
                 "ImmAssert failed in %m @time=%0t: %s-- %s: ",
                 $time, pos, assertName, assertFmtMsg
             );
+`ifdef BLUERDMA_IMMFAIL_ENABLE_TIME
+            let curTime <- $time;
+            if (curTime >= fromInteger(`BLUERDMA_IMMFAIL_ENABLE_TIME)) begin
+                $finish(1);
+            end
+            else begin
+                $error("ImmFail triggered but not enabled yet, current time=%0t, enable time=%0t", curTime, fromInteger(`BLUERDMA_IMMFAIL_ENABLE_TIME));
+            end
+`else
             $finish(1);
+`endif
         end
     endaction
 endfunction
@@ -178,7 +188,17 @@ function Action immFail(String assertName, Fmt assertFmtMsg);
             "ImmAssert failed in %m @time=%0t: %s-- %s: ",
             $time, pos, assertName, assertFmtMsg
         );
+`ifdef BLUERDMA_IMMFAIL_ENABLE_TIME
+        let curTime <- $time;
+        if (curTime >= fromInteger(`BLUERDMA_IMMFAIL_ENABLE_TIME)) begin
+            $finish(1);
+        end
+        else begin
+            $error("ImmFail triggered but not enabled yet, current time=%0t, enable time=%0t", curTime, fromInteger(`BLUERDMA_IMMFAIL_ENABLE_TIME));
+        end
+`else
         $finish(1);
+`endif
     endaction
 endfunction
 

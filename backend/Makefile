@@ -1,5 +1,9 @@
 include ../Makefile.base
 
+ifdef BLUERDMA_IMMFAIL_ENABLE_TIME
+MISCFLAGS += -D BLUERDMA_IMMFAIL_ENABLE_TIME=$(BLUERDMA_IMMFAIL_ENABLE_TIME)
+endif
+
 TCLDIR ?= xdc
 CLK ?= rdma_clock
 OOC ?= 1
@@ -162,9 +166,21 @@ BACKEND_CONFIG_VARS := \
 BACKEND_CONFIG_RAW := $(foreach v,$(BACKEND_CONFIG_VARS),$(v)=$($(v))|)
 BACKEND_CONFIG_HASH := $(shell printf '%s' '$(BACKEND_CONFIG_RAW)' | sha1sum | cut -c1-12)
 BACKEND_CONFIG_KEY := $(BSV_TOP_MODULE)__$(BLUERDMA_BUILD_TARGET)__$(BACKEND_CONFIG_HASH)
-BACKEND_CONFIG_STAMP := $(BUILDDIR)/.backend_config_$(BACKEND_CONFIG_KEY).stamp
-COMPILE_STAMP := $(BUILDDIR)/.$(BACKEND_CONFIG_KEY).compile.stamp
-VERILOG_STAMP := $(BACKENDDIR)/verilog/.$(BACKEND_CONFIG_KEY).verilog.stamp
+CONFIG_CACHE_ROOT := $(BACKENDDIR)/config_cache
+CONFIG_CACHE_DIR := $(CONFIG_CACHE_ROOT)/$(BACKEND_CONFIG_KEY)
+CONFIG_BUILD_DIR := $(CONFIG_CACHE_DIR)/build
+CONFIG_VERILOG_DIR := $(CONFIG_CACHE_DIR)/verilog
+SHARED_BUILD_DIR := build
+SHARED_VERILOG_DIR := $(BACKENDDIR)/verilog
+ACTIVE_COMPILE_CONFIG := $(SHARED_BUILD_DIR)/.active_compile_config
+ACTIVE_VERILOG_CONFIG := $(SHARED_VERILOG_DIR)/.active_verilog_config
+BACKEND_CONFIG_STAMP := $(CONFIG_BUILD_DIR)/.backend_config.stamp
+COMPILE_STAMP := $(CONFIG_BUILD_DIR)/.compile.stamp
+VERILOG_STAMP := $(CONFIG_VERILOG_DIR)/.verilog.stamp
+
+BUILDDIR := $(CONFIG_BUILD_DIR)
+OUTDIR := -bdir $(BUILDDIR) -info-dir $(BUILDDIR) -simdir $(BUILDDIR) -vdir $(BUILDDIR)
+DIRFLAGS := $(BSVSRCDIR) $(OUTDIR) $(WORKDIR)
 
 
 
@@ -185,7 +201,7 @@ export TOP
 export RTL_DIRS
 export DEVICE
 export FAMILY
-export DIR_BSV_GENERATED = $(BACKENDDIR)/verilog
+export DIR_BSV_GENERATED = $(CONFIG_VERILOG_DIR)
 
 export BLUE_RDMA_DMA_IP_TYPE
 export BLUE_RDMA_ETH_IP_TYPE
@@ -195,47 +211,83 @@ ifdef IS_COMPILE_FOR_SIM
 	MISCFLAGS += -D IS_COMPILE_FOR_SIM
 endif
 
+define update_active_config_file
+	@tmp_file="$(1).tmp"; \
+	printf '%s\n' "$(BACKEND_CONFIG_KEY)" > "$$tmp_file"; \
+	if ! test -f "$(1)" || ! cmp -s "$$tmp_file" "$(1)"; then \
+		mv "$$tmp_file" "$(1)"; \
+	else \
+		rm -f "$$tmp_file"; \
+	fi
+endef
+
+define sync_cache_dir
+	@mkdir -p "$(2)"; \
+	find "$(2)" -mindepth 1 ! -name '.active_*' -exec rm -rf {} +; \
+	if test -d "$(1)"; then \
+		cp -a "$(1)"/. "$(2)/"; \
+	fi
+endef
+
+define commit_compile_active_config
+	@mkdir -p "$(SHARED_BUILD_DIR)"
+	$(call update_active_config_file,$(ACTIVE_COMPILE_CONFIG))
+endef
+
+define commit_all_active_configs
+	@mkdir -p "$(SHARED_BUILD_DIR)" "$(SHARED_VERILOG_DIR)"
+	$(call update_active_config_file,$(ACTIVE_COMPILE_CONFIG))
+	$(call update_active_config_file,$(ACTIVE_VERILOG_CONFIG))
+endef
 
 $(BACKEND_CONFIG_STAMP):
-	mkdir -p $(BUILDDIR)
+	mkdir -p $(CONFIG_BUILD_DIR)
 	touch $@
 
 $(COMPILE_STAMP): $(BSC_SOURCE_FILES) $(BACKEND_BUILD_DEPS) $(BACKEND_CONFIG_STAMP)
-	mkdir -p $(BUILDDIR)
-	# rm $(BUILDDIR)/FullyPipelineChecker.bo
+	mkdir -p $(CONFIG_BUILD_DIR)
+	# rm $(CONFIG_BUILD_DIR)/FullyPipelineChecker.bo
 	bsc -elab -verilog -verbose $(BLUESIMFLAGS) $(DEBUGFLAGS) $(DIRFLAGS) $(MISCFLAGS) $(RECOMPILEFLAGS) $(RUNTIMEFLAGS) $(SCHEDFLAGS) $(TRANSFLAGS) -g $(BSV_TOP_MODULE) $(TARGETFILE)
 	touch $@
 
 compile: $(COMPILE_STAMP)
+	$(call sync_cache_dir,$(CONFIG_BUILD_DIR),$(SHARED_BUILD_DIR))
+	$(call commit_compile_active_config)
 
 $(VERILOG_STAMP): $(COMPILE_STAMP) $(VERILOG_HELPERS)
-	mkdir -p $(DIR_BSV_GENERATED)
+	mkdir -p $(CONFIG_VERILOG_DIR)
 	bsc $(VERILOGFLAGS) $(DIRFLAGS) $(MISCFLAGS) $(RECOMPILEFLAGS) $(RUNTIMEFLAGS) $(TRANSFLAGS) -g $(BSV_TOP_MODULE) $(TARGETFILE)
-	bluetcl listVlogFiles.tcl -bdir $(BUILDDIR) -vdir $(BUILDDIR) $(BSV_TOP_MODULE) $(BSV_TOP_MODULE) | grep -i '\.v' | xargs -I {} cp {} $(DIR_BSV_GENERATED)
-	python3 ./reset_tree_wrapper.py ./verilog/mkSqGroup.v
-	python3 ./reset_tree_wrapper.py ./verilog/mkRqGroup.v
+	bluetcl listVlogFiles.tcl -bdir $(CONFIG_BUILD_DIR) -vdir $(CONFIG_BUILD_DIR) $(BSV_TOP_MODULE) $(BSV_TOP_MODULE) | grep -i '\.v' | xargs -I {} cp {} $(CONFIG_VERILOG_DIR)
+	python3 ./reset_tree_wrapper.py $(CONFIG_VERILOG_DIR)/mkSqGroup.v
+	python3 ./reset_tree_wrapper.py $(CONFIG_VERILOG_DIR)/mkRqGroup.v
 	# mkBsvTopOnlyHardIp contains RTile HIP primitives; bluetcl may not copy it automatically
-	test -f $(BUILDDIR)/mkBsvTopOnlyHardIp.v && cp $(BUILDDIR)/mkBsvTopOnlyHardIp.v $(DIR_BSV_GENERATED)/ || true
-	test -f ./verilog/mkBsvTopOnlyHardIp.v && python3 ./reset_tree_wrapper.py ./verilog/mkBsvTopOnlyHardIp.v || true
-	python3 ./apply_reset_signal_patch.py ./verilog
+	test -f $(CONFIG_BUILD_DIR)/mkBsvTopOnlyHardIp.v && cp $(CONFIG_BUILD_DIR)/mkBsvTopOnlyHardIp.v $(CONFIG_VERILOG_DIR)/ || true
+	test -f $(CONFIG_VERILOG_DIR)/mkBsvTopOnlyHardIp.v && python3 ./reset_tree_wrapper.py $(CONFIG_VERILOG_DIR)/mkBsvTopOnlyHardIp.v || true
+	python3 ./apply_reset_signal_patch.py $(CONFIG_VERILOG_DIR)
 	touch $@
 
 verilog: $(VERILOG_STAMP)
+	$(call sync_cache_dir,$(CONFIG_BUILD_DIR),$(SHARED_BUILD_DIR))
+	$(call sync_cache_dir,$(CONFIG_VERILOG_DIR),$(SHARED_VERILOG_DIR))
+	$(call commit_all_active_configs)
 
-vivado:
+# TODO: refactor 后未实际执行 Vivado / Quartus 的长时硬件编译验证。
+# 当前路径协议保持不变，下游仍消费共享 backend/verilog/*.v，共享镜像
+# 在进入硬件后端前会先由 verilog 目标刷新，理论上大概率可正常工作。
+vivado: verilog
 	cd vivado && \
 	vivado -mode tcl -nolog -nojournal -source ./build_top.tcl 2>&1 | tee $(LOGFILE)
 
-vivado_ooc:
+vivado_ooc: verilog
 	cd vivado && \
 	vivado -mode tcl -nolog -nojournal -source ./build_top.tcl 2>&1 | tee $(LOGFILE)
 
-quartus:
+quartus: verilog
 	cd quartus && \
 	quartus_sh -t non-project-build.tcl
 
 clean:
-	rm -rf $(BUILDDIR) $(WORK_DIR) $(DIR_BSV_GENERATED) $(DIR_BSV_GENERATED_STUB) .Xil *.jou *.log
+	rm -rf $(SHARED_BUILD_DIR) $(WORK_DIR) $(SHARED_VERILOG_DIR) $(DIR_BSV_GENERATED_STUB) $(CONFIG_CACHE_ROOT) .Xil *.jou *.log
 
-.PHONY: vivado clean quartus
+.PHONY: verilog vivado clean quartus
 .DEFAULT_GOAL := verilog
