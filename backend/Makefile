@@ -172,11 +172,10 @@ CONFIG_BUILD_DIR := $(CONFIG_CACHE_DIR)/build
 CONFIG_VERILOG_DIR := $(CONFIG_CACHE_DIR)/verilog
 SHARED_BUILD_DIR := build
 SHARED_VERILOG_DIR := $(BACKENDDIR)/verilog
-ACTIVE_COMPILE_CONFIG := $(SHARED_BUILD_DIR)/.active_compile_config
-ACTIVE_VERILOG_CONFIG := $(SHARED_VERILOG_DIR)/.active_verilog_config
-BACKEND_CONFIG_STAMP := $(CONFIG_BUILD_DIR)/.backend_config.stamp
 COMPILE_STAMP := $(CONFIG_BUILD_DIR)/.compile.stamp
 VERILOG_STAMP := $(CONFIG_VERILOG_DIR)/.verilog.stamp
+SHARED_COMPILE_STAMP := $(SHARED_BUILD_DIR)/.active_compile_$(BACKEND_CONFIG_KEY)
+SHARED_VERILOG_STAMP := $(SHARED_VERILOG_DIR)/.active_verilog_$(BACKEND_CONFIG_KEY)
 
 BUILDDIR := $(CONFIG_BUILD_DIR)
 OUTDIR := -bdir $(BUILDDIR) -info-dir $(BUILDDIR) -simdir $(BUILDDIR) -vdir $(BUILDDIR)
@@ -211,48 +210,26 @@ ifdef IS_COMPILE_FOR_SIM
 	MISCFLAGS += -D IS_COMPILE_FOR_SIM
 endif
 
-define update_active_config_file
-	@tmp_file="$(1).tmp"; \
-	printf '%s\n' "$(BACKEND_CONFIG_KEY)" > "$$tmp_file"; \
-	if ! test -f "$(1)" || ! cmp -s "$$tmp_file" "$(1)"; then \
-		mv "$$tmp_file" "$(1)"; \
-	else \
-		rm -f "$$tmp_file"; \
-	fi
-endef
-
-define sync_cache_dir
+define sync_shared_dir
 	@mkdir -p "$(2)"; \
-	find "$(2)" -mindepth 1 ! -name '.active_*' -exec rm -rf {} +; \
+	find "$(2)" -mindepth 1 -exec rm -rf {} +; \
 	if test -d "$(1)"; then \
 		cp -a "$(1)"/. "$(2)/"; \
-	fi
+	fi; \
+	rm -f "$(2)"/.active_compile_* "$(2)"/.active_verilog_*; \
+	touch "$(3)"
 endef
 
-define commit_compile_active_config
-	@mkdir -p "$(SHARED_BUILD_DIR)"
-	$(call update_active_config_file,$(ACTIVE_COMPILE_CONFIG))
-endef
-
-define commit_all_active_configs
-	@mkdir -p "$(SHARED_BUILD_DIR)" "$(SHARED_VERILOG_DIR)"
-	$(call update_active_config_file,$(ACTIVE_COMPILE_CONFIG))
-	$(call update_active_config_file,$(ACTIVE_VERILOG_CONFIG))
-endef
-
-$(BACKEND_CONFIG_STAMP):
-	mkdir -p $(CONFIG_BUILD_DIR)
-	touch $@
-
-$(COMPILE_STAMP): $(BSC_SOURCE_FILES) $(BACKEND_BUILD_DEPS) $(BACKEND_CONFIG_STAMP)
+$(COMPILE_STAMP): $(BSC_SOURCE_FILES) $(BACKEND_BUILD_DEPS)
 	mkdir -p $(CONFIG_BUILD_DIR)
 	# rm $(CONFIG_BUILD_DIR)/FullyPipelineChecker.bo
 	bsc -elab -verilog -verbose $(BLUESIMFLAGS) $(DEBUGFLAGS) $(DIRFLAGS) $(MISCFLAGS) $(RECOMPILEFLAGS) $(RUNTIMEFLAGS) $(SCHEDFLAGS) $(TRANSFLAGS) -g $(BSV_TOP_MODULE) $(TARGETFILE)
 	touch $@
 
-compile: $(COMPILE_STAMP)
-	$(call sync_cache_dir,$(CONFIG_BUILD_DIR),$(SHARED_BUILD_DIR))
-	$(call commit_compile_active_config)
+$(SHARED_COMPILE_STAMP): $(COMPILE_STAMP)
+	$(call sync_shared_dir,$(CONFIG_BUILD_DIR),$(SHARED_BUILD_DIR),$@)
+
+compile: $(SHARED_COMPILE_STAMP)
 
 $(VERILOG_STAMP): $(COMPILE_STAMP) $(VERILOG_HELPERS)
 	mkdir -p $(CONFIG_VERILOG_DIR)
@@ -266,10 +243,16 @@ $(VERILOG_STAMP): $(COMPILE_STAMP) $(VERILOG_HELPERS)
 	python3 ./apply_reset_signal_patch.py $(CONFIG_VERILOG_DIR)
 	touch $@
 
-verilog: $(VERILOG_STAMP)
-	$(call sync_cache_dir,$(CONFIG_BUILD_DIR),$(SHARED_BUILD_DIR))
-	$(call sync_cache_dir,$(CONFIG_VERILOG_DIR),$(SHARED_VERILOG_DIR))
-	$(call commit_all_active_configs)
+$(SHARED_VERILOG_STAMP): $(VERILOG_STAMP) $(SHARED_COMPILE_STAMP)
+	$(call sync_shared_dir,$(CONFIG_VERILOG_DIR),$(SHARED_VERILOG_DIR),$@)
+
+verilog: $(SHARED_VERILOG_STAMP)
+
+print-config-key:
+	@echo $(BACKEND_CONFIG_KEY)
+
+print-config-verilog-dir:
+	@echo $(abspath $(CONFIG_VERILOG_DIR))
 
 # TODO: refactor 后未实际执行 Vivado / Quartus 的长时硬件编译验证。
 # 当前路径协议保持不变，下游仍消费共享 backend/verilog/*.v，共享镜像

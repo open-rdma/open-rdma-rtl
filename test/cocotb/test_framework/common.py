@@ -85,10 +85,14 @@ def run_cocotb_simulation(
         )
 
     verilog_sources = gen_rtl_file_list(rtl_dirs)
+    sim_build_key = os.getenv("BLUERDMA_VERILOG_CACHE_KEY")
+    sim_build_name = sim_build_suffix or dut_name
+    if sim_build_key:
+        sim_build_name = f"{sim_build_name}__{sim_build_key}"
     sim_build = os.path.join(
         tests_dir,
         "sim_build",
-        sim_build_suffix or dut_name,
+        sim_build_name,
     )
     copy_mem_file_to_sim_build_dir(rtl_dirs, sim_build)
 

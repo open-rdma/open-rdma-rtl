@@ -21,8 +21,6 @@ GENERATED_VSRC_DIR := $(BACKEND_DIR)/verilog
 PCIE_WRAPPER_DIR := $(TB_DIR)/verilog
 QUARTUS_RTL_DIR := $(BACKEND_DIR)/quartus/rtl
 PCIE_RESET_RTL := $(QUARTUS_RTL_DIR)/rtile_reset_output_buffer.v
-COMMON_VERILOG_DIR = $(SRC_DIR)/verilog:$(GENERATED_VSRC_DIR)
-PCIE_VERILOG_DIR = $(PCIE_WRAPPER_DIR):$(PCIE_RESET_RTL):$(COMMON_VERILOG_DIR)
 
 include $(ROOT_DIR)/Makefile.base
 
@@ -38,8 +36,8 @@ FLOW_NAME := pcie
 BSV_BUILD_TOP := mkBsvTop
 SIM_TOP := top_mkBsvTopWithResetBuffer
 TB_FILE ?= $(PCIE_TB_FILE)
-SIM_VERILOG_DIR := $(PCIE_VERILOG_DIR)
-PREPARE_TARGET := $(PCIE_WRAPPER_DIR)/$(SIM_TOP).v
+SIM_VERILOG_DIR = $(PCIE_VERILOG_DIR)
+PREPARE_TARGET = $(PCIE_WRAPPER_DIR)/$(SIM_TOP).v
 # TODO: Keep this compile-time threshold aligned with the cocotb-pcie/rtile
 # reset-release timing model. If the Python-side reset choreography changes,
 # update this fixed Makefile constant in lockstep.
@@ -49,10 +47,15 @@ FLOW_NAME := default
 BSV_BUILD_TOP := mkBsvTopWithoutHardIpInstance
 SIM_TOP := mkBsvTopWithoutHardIpInstance
 TB_FILE ?= tb_top_without_hard_ip.py
-SIM_VERILOG_DIR := $(COMMON_VERILOG_DIR)
-PREPARE_TARGET := $(GENERATED_VSRC_DIR)/$(SIM_TOP).v
+SIM_VERILOG_DIR = $(COMMON_VERILOG_DIR)
+PREPARE_TARGET = $(HASHED_GENERATED_VSRC_DIR)/$(SIM_TOP).v
 FLOW_VERILOG_MAKE_ARGS :=
 endif
+
+HASHED_GENERATED_VSRC_DIR := $(shell $(MAKE) -s -C $(BACKEND_DIR) TARGETFILE=$(TOP_BSV_SRC_FILE) BSV_TOP_MODULE=$(BSV_BUILD_TOP) IS_COMPILE_FOR_SIM=True $(FLOW_VERILOG_MAKE_ARGS) print-config-verilog-dir)
+VERILOG_CACHE_KEY := $(shell $(MAKE) -s -C $(BACKEND_DIR) TARGETFILE=$(TOP_BSV_SRC_FILE) BSV_TOP_MODULE=$(BSV_BUILD_TOP) IS_COMPILE_FOR_SIM=True $(FLOW_VERILOG_MAKE_ARGS) print-config-key)
+COMMON_VERILOG_DIR = $(SRC_DIR)/verilog:$(HASHED_GENERATED_VSRC_DIR)
+PCIE_VERILOG_DIR = $(PCIE_WRAPPER_DIR):$(PCIE_RESET_RTL):$(COMMON_VERILOG_DIR)
 
 # Legacy compatibility: TOP_MODULE was the original single-line cocotb test
 # selector before the flow model was introduced. Keep it and the older
@@ -96,8 +99,8 @@ COMPILE_VERILOG_DIR = $(SIM_VERILOG_DIR)
 # TOP_MODULE ?= mkBsvTop
 # TB_FILE = tb_100g_with_bdma.py
 
-BACKEND_TOP_V := $(GENERATED_VSRC_DIR)/$(BSV_BUILD_TOP).v
-SIM_TOP_V := $(PREPARE_TARGET)
+BACKEND_TOP_V := $(HASHED_GENERATED_VSRC_DIR)/$(BSV_BUILD_TOP).v
+SIM_TOP_V = $(PREPARE_TARGET)
 VLOG_FILE = $(TB_DIR)/$(BSV_BUILD_TOP).v
 
 DATE = $(shell date "+%Y%m%d")
@@ -112,49 +115,46 @@ verilog:
 	$(MAKE) -C $(BACKEND_DIR) TARGETFILE=$(TOP_BSV_SRC_FILE) BSV_TOP_MODULE=$(BSV_BUILD_TOP) IS_COMPILE_FOR_SIM=True $(FLOW_VERILOG_MAKE_ARGS) verilog
 	test -f $(BACKEND_TOP_V)
 
-prepare: verilog $(SIM_TOP_V)
-	grep -q '^`timescale 1ns/1ps' $(SIM_TOP_V) || sed -i '1i `timescale 1ns/1ps' $(SIM_TOP_V)
-
-run: prepare
+run: verilog $(SIM_TOP_V)
 	cd $(TB_DIR)
 	mkdir -p log
 
 	set -o pipefail; \
-	COCOTB_VERILOG_DIR=$(SIM_VERILOG_DIR) COCOTB_DUT=$(SIM_TOP) BLUERDMA_DATA_BUS_WIDTH=$(BLUERDMA_DATA_BUS_WIDTH) python3 $(TB_FILE) 2>&1 | tee $(LOG_FILE)
+	COCOTB_VERILOG_DIR=$(SIM_VERILOG_DIR) COCOTB_DUT=$(SIM_TOP) BLUERDMA_DATA_BUS_WIDTH=$(BLUERDMA_DATA_BUS_WIDTH) BLUERDMA_VERILOG_CACHE_KEY=$(VERILOG_CACHE_KEY) python3 $(TB_FILE) 2>&1 | tee $(LOG_FILE)
 
 
 #在这里
 # iverilog
 # cocotb (python3)
-run_system_test_server_loopback: prepare
+run_system_test_server_loopback: verilog $(SIM_TOP_V)
 	cd $(TB_DIR)
 	mkdir -p log
 
 	set -o pipefail ; \
-	COCOTB_VERILOG_DIR=$(SIM_VERILOG_DIR) COCOTB_DUT=$(SIM_TOP) BLUERDMA_SIMULATOR_INST_ID=1 BLUERDMA_DATA_BUS_WIDTH=$(BLUERDMA_DATA_BUS_WIDTH) python3 $(LOOPBACK_TB_FILE) 2>&1 | tee $(LOG_FILE).loopback
+	COCOTB_VERILOG_DIR=$(SIM_VERILOG_DIR) COCOTB_DUT=$(SIM_TOP) BLUERDMA_SIMULATOR_INST_ID=1 BLUERDMA_DATA_BUS_WIDTH=$(BLUERDMA_DATA_BUS_WIDTH) BLUERDMA_VERILOG_CACHE_KEY=$(VERILOG_CACHE_KEY) python3 $(LOOPBACK_TB_FILE) 2>&1 | tee $(LOG_FILE).loopback
 
-run_system_test_server_1: prepare
+run_system_test_server_1: verilog $(SIM_TOP_V)
 	cd $(TB_DIR)
 	mkdir -p log
 
 	set -o pipefail ; \
-	COCOTB_VERILOG_DIR=$(SIM_VERILOG_DIR) COCOTB_DUT=$(SIM_TOP) BLUERDMA_SIMULATOR_INST_ID=1 BLUERDMA_DATA_BUS_WIDTH=$(BLUERDMA_DATA_BUS_WIDTH) python3 $(TWO_CARD_TB_FILE) 2>&1 | tee $(LOG_FILE).1
+	COCOTB_VERILOG_DIR=$(SIM_VERILOG_DIR) COCOTB_DUT=$(SIM_TOP) BLUERDMA_SIMULATOR_INST_ID=1 BLUERDMA_DATA_BUS_WIDTH=$(BLUERDMA_DATA_BUS_WIDTH) BLUERDMA_VERILOG_CACHE_KEY=$(VERILOG_CACHE_KEY) python3 $(TWO_CARD_TB_FILE) 2>&1 | tee $(LOG_FILE).1
 
-run_system_test_server_2: prepare
+run_system_test_server_2: verilog $(SIM_TOP_V)
 	cd $(TB_DIR)
 	mkdir -p log
 
 	set -o pipefail ; \
-	COCOTB_VERILOG_DIR=$(SIM_VERILOG_DIR) COCOTB_DUT=$(SIM_TOP) BLUERDMA_SIMULATOR_INST_ID=2 BLUERDMA_DATA_BUS_WIDTH=$(BLUERDMA_DATA_BUS_WIDTH) python3 $(TWO_CARD_TB_FILE) 2>&1 | tee $(LOG_FILE).2
+	COCOTB_VERILOG_DIR=$(SIM_VERILOG_DIR) COCOTB_DUT=$(SIM_TOP) BLUERDMA_SIMULATOR_INST_ID=2 BLUERDMA_DATA_BUS_WIDTH=$(BLUERDMA_DATA_BUS_WIDTH) BLUERDMA_VERILOG_CACHE_KEY=$(VERILOG_CACHE_KEY) python3 $(TWO_CARD_TB_FILE) 2>&1 | tee $(LOG_FILE).2
 
-run_system_test_multi_node: prepare
+run_system_test_multi_node: verilog $(SIM_TOP_V)
 	cd $(TB_DIR)
 	mkdir -p log
 
 	set -o pipefail ; \
-	COCOTB_VERILOG_DIR=$(SIM_VERILOG_DIR) COCOTB_DUT=$(SIM_TOP) BLUERDMA_SIMULATOR_INST_ID=$(INST_ID) BLUERDMA_DATA_BUS_WIDTH=$(BLUERDMA_DATA_BUS_WIDTH) python3 $(MULTI_NODE_TB_FILE) 2>&1 | tee $(LOG_FILE).$(INST_ID)
+	COCOTB_VERILOG_DIR=$(SIM_VERILOG_DIR) COCOTB_DUT=$(SIM_TOP) BLUERDMA_SIMULATOR_INST_ID=$(INST_ID) BLUERDMA_DATA_BUS_WIDTH=$(BLUERDMA_DATA_BUS_WIDTH) BLUERDMA_VERILOG_CACHE_KEY=$(VERILOG_CACHE_KEY) python3 $(MULTI_NODE_TB_FILE) 2>&1 | tee $(LOG_FILE).$(INST_ID)
 
-run_pcie_system_test: prepare
+run_pcie_system_test: verilog $(SIM_TOP_V)
 	cd $(TB_DIR)
 	mkdir -p log
 
@@ -167,12 +167,13 @@ run_pcie_system_test: prepare
 		COCOTB_DUT=$(SIM_TOP) \
 		BLUERDMA_SIMULATOR_INST_ID=1 \
 		BLUERDMA_DATA_BUS_WIDTH=$(BLUERDMA_DATA_BUS_WIDTH) \
+		BLUERDMA_VERILOG_CACHE_KEY=$(VERILOG_CACHE_KEY) \
 		BLUERDMA_SIM_BACKEND=$(BLUERDMA_SIM_BACKEND) \
 		python3 $(PCIE_TB_FILE) 2>&1 | tee $(LOG_FILE)
 
 # Compile Verilator without running full tests
 # Usage: make compile_verilator [TOP_MODULE=<module_name>] [BLUERDMA_DATA_BUS_WIDTH=<width>]
-compile_verilator: verilog
+compile_verilator: verilog $(SIM_TOP_V)
 	@echo "==============================================="
 	@echo "Compiling Verilator for $(SIM_TOP)"
 	@echo "Data bus width: $(BLUERDMA_DATA_BUS_WIDTH)"
@@ -181,14 +182,15 @@ compile_verilator: verilog
 	COCOTB_VERILOG_DIR=$(COMPILE_VERILOG_DIR) \
 	COCOTB_DUT=$(SIM_TOP) \
 	BLUERDMA_DATA_BUS_WIDTH=$(BLUERDMA_DATA_BUS_WIDTH) \
+	BLUERDMA_VERILOG_CACHE_KEY=$(VERILOG_CACHE_KEY) \
 	$(PYTHON) compile_verilator.py
 
 
 
-cocotb:clean verilog prepare run
+cocotb:clean verilog run
 
 clean:
 	$(MAKE) -C $(BACKEND_DIR) clean
 	cd $(TB_DIR) && rm -rf $(VLOG_FILE) __pycache__ .pytest_cache sim_build *.log 
 	
-.PHONY: verilog prepare run run_system_test_server_loopback run_system_test_server_1 run_system_test_server_2 run_system_test_multi_node run_pcie_system_test clean compile_verilator cocotb
+.PHONY: verilog run run_system_test_server_loopback run_system_test_server_1 run_system_test_server_2 run_system_test_multi_node run_pcie_system_test clean compile_verilator cocotb
