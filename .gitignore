@@ -1,0 +1,4 @@
+# build artifacts (BSC + cocotb per-folder)
+build/
+__pycache__/
+*.pyc
