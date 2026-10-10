@@ -1,7 +1,8 @@
 # OpenRDMA-flow
 
-M0–M3 RDMA TX 数据通路的分模块自持树。四个模块文件夹（m0–m3）**互不依赖**，各自携带 RTL、
-tb、cocotb 单测与 Makefile，拷走即用；只有 `integration/` 依赖模块文件夹（它本来就是"集成"）。
+M0–M3 RDMA TX 与 M4–M8 RX 数据通路的分模块自持树。TX 四个模块和 RX 五个 unit
+均各自携带 RTL、tb、cocotb 单测与 Makefile，拷走即用；`integration/` 和 `rx_integration/`
+分别承载 TX 与 RX 的跨模块连接。
 
 ```
 OpenRDMA-flow/
@@ -9,8 +10,13 @@ OpenRDMA-flow/
 ├── m1/   DMA          DmaEngine（乱序 completion → 有序 payload）+ DmaPayloadCompactor（→ M2 拍契约）
 ├── m2/   PacketAssembly  message → PTU 分片 packet（descriptor 元数据 + payload，不含 wire header）
 ├── m3/   MrcTxScheduler 四通道 TX 调度 + EV 路径管理 + Ethernet/IP/UDP/BTH 封装 → 4×EthPacket
-└── integration/       M0MessageAdapter + DmaPhaseAIntegration（Synchronizer/DoneChecker/CommitTracker
-                       内联）+ 端到端 tb/cocotb；BSV 类型经 -p 从 ../m{0..3}/src 解析，不持有类型副本
+├── integration/       TX M0MessageAdapter + DmaPhaseAIntegration + 端到端 tb/cocotb
+├── m4/   RX PacketBuffer：frame slot、payload storage/read/release
+├── m5/   RX PacketParser：Ethernet/IPv4/UDP/BTH/RETH parser
+├── m6/   RX RQ Bitmap：PSN window、receive bitmap、ACK/SACK/NAK、admission
+├── m7/   RX DMA Placement：packet DMA、completion merge、ordered retire
+├── m8/   RX OrderedQueue：DMA watermark、CQE、Ordered Flag barrier/credit
+└── rx_integration/    RxTop + current TX M2/M3 → RX loopback；不持有 BSV 类型副本
 ```
 
 ## 运行测试
@@ -30,6 +36,9 @@ cocotb 测试必须使用安装了 Cocotb 2 的解释器；可先用
 | m3 单测 | `make -C m3 test` / `test-long` / `yosys` | scheduler 9 例 + MRC profile 10 例；long = 双 profile 随机 + 路径状态扰动；含 standalone-verilog + yosys |
 | integration | `make -C integration test-integration` / `test-long` | DmaPhaseA 端到端 5 例 + long |
 | m0chain | `make -C integration test-m0chain` / `test-m0chain-long` | 真·m0→m3（GDRP → frame），6 例 + long |
+| RX unit | `make -C m4 test` 等 | M4–M8 五个自持 unit：6 + 3 + 8 + 5 + 9 例；M6 long 增加固定 seed 随机 |
+| RX integration | `make -C rx_integration test` | `RxTop` 5 例 + current TX M2/M3→RX loopback 1 例 |
+| RX 全矩阵 | `make test-rx` / `make test-rx-long` | short 37 例；long 38 例；production 用 `make production-rx-verilog` |
 | negative | `make -C integration test-negative`（SIM=icarus） | 4 个 expected-fatal |
 
 `make -C integration compile/verilog` 会先跑 `preflight`。
@@ -84,6 +93,11 @@ integration 的 -p 包选择或 cocotb packing/driver 行为就会变成顺序�
 同步规则：只允许整树一致的修改（例如给 `CommonTypes.bsv` 加类型时四个副本要一起改）。
 模块内只有一份的类型（DmaTypes/TxMvpTypes）没有门，改起来最自由。
 
+顶层五个 RX unit 维护独立的共享闭包与门禁：各自持有 current TX M2 版本的
+`CommonTypes.bsv`、`TxTypes.bsv` 和 byte-identical `RxTypes.bsv`；`rx_integration/` 不持有 BSV
+类型副本。RX preflight 只比较 current TX M2/M3 与 RX 副本，不依赖 TX M1，因此不会绕过、也不会被
+TX integration 自己的既有门禁状态干扰。详细边界见 `RX_README.md`。
+
 ## python 镜像与自持
 
 每个文件夹 `cocotb/` 自持其测试所需的全部 python（bfm/model 镜像 + `lib/cocotb_bsv`）。
@@ -98,3 +112,6 @@ ActionValueMethod），五个文件夹内容一致，能同时服务两套套件
 原仓库原样保留。模块文件 = 上游源码 + 本次联调新增/修复（无未提交改动丢失）；
 integration 的 m0chain 套件等为本轮新增。本树不依赖原仓库路径，单独拷贝后可在任何位置运行
 （integration 需要与 m0..m3 同级目录）。
+
+RX 从原 `mvp/rx` 迁入并重构为同样的自持布局；旧 fixed-baseline 文档、验证记录和 upstream 快照
+保存在 `reference/rx-mvp-legacy/`，不参与 active build。
