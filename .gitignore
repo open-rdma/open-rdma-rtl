@@ -10,3 +10,8 @@ __pycache__/
 
 # Archify 架构图产物（仅本地保留，不入库）
 .archify/
+
+# BMAD Method 本地工具链与生成产物（可由安装器重新生成，不入库）
+.claude/
+_bmad/
+_bmad-output/
