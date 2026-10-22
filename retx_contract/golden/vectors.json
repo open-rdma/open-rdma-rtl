@@ -1,0 +1,127 @@
+{
+  "objects": {
+    "HoleEntry": {
+      "fields": {
+        "ev_profile": 0,
+        "is_first": 0,
+        "is_last": 0,
+        "message_offset": 512,
+        "mrc_msn": 0,
+        "msn_valid": 0,
+        "opcode": 10,
+        "packet_count": 4,
+        "packet_index": 1,
+        "payload_length": 256,
+        "pmtu": 2,
+        "psn": 101,
+        "record_handle": 7,
+        "remote_addr": 1234605616436508552,
+        "remote_key": 3405691582,
+        "request_id": 42,
+        "slot_id": 3,
+        "wire_profile": 0
+      }
+    },
+    "Notification": {
+      "fields": {
+        "byte_length": 32,
+        "host_session_id": 4660,
+        "nic_session_id": 195948557,
+        "qp_epoch": 7,
+        "qpn": 1193046,
+        "report_byte_length": 104,
+        "report_generation": 11,
+        "ring_slot": 3,
+        "version": 1
+      }
+    },
+    "OnDemandRequest": {
+      "fields": {
+        "byte_length": 32,
+        "host_session_id": 4660,
+        "last_seen_report_generation": 10,
+        "nic_session_id": 195948557,
+        "qp_epoch": 7,
+        "qpn": 1193046,
+        "reason": 2,
+        "request_id": 8,
+        "version": 1
+      }
+    },
+    "ReportHeader": {
+      "fields": {
+        "ack_psn": 100,
+        "byte_length": 104,
+        "flags": 3,
+        "hole_count": 1,
+        "hole_entries_included": 1,
+        "nak_psn": 0,
+        "nak_valid_and_code": 0,
+        "nic_session_id": 195948557,
+        "ooo_count": 3,
+        "outstanding_base": 101,
+        "outstanding_count": 4,
+        "qp_epoch": 7,
+        "qpn": 1193046,
+        "report_generation": 11,
+        "sack_base": 101,
+        "sack_bitmap": 10,
+        "sack_valid_bits": 4,
+        "scoreboard_generation": 9,
+        "version": 1
+      }
+    },
+    "RetryBatchHeader": {
+      "fields": {
+        "byte_length": 56,
+        "entry_count": 1,
+        "flags": 1,
+        "nic_session_id": 195948557,
+        "version": 1
+      }
+    },
+    "RetryEntry": {
+      "fields": {
+        "expected_packet_index": 1,
+        "expected_request_id": 42,
+        "host_session_id": 4660,
+        "psn": 101,
+        "qp_epoch": 7,
+        "qpn": 1193046,
+        "record_handle": 7,
+        "report_generation": 11,
+        "retry_attempt": 0,
+        "retry_request_id": 5,
+        "trigger_reason": 2
+      }
+    },
+    "RetryResult": {
+      "fields": {
+        "byte_length": 40,
+        "egress_sequence": 9,
+        "fetch_id": 3,
+        "host_session_id": 4660,
+        "nic_session_id": 195948557,
+        "psn": 101,
+        "qp_epoch": 7,
+        "qpn": 1193046,
+        "reason_code": 0,
+        "report_generation": 11,
+        "result_sequence": 1,
+        "retry_request_id": 5,
+        "status": 2,
+        "version": 1
+      }
+    },
+    "RingCredit": {
+      "fields": {
+        "consumer_sequence": 11,
+        "object_identity": 153,
+        "ring_id": 1,
+        "slot": 3,
+        "version": 1
+      }
+    }
+  },
+  "schema_version": 1
+}

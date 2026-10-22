@@ -6,10 +6,13 @@ BSC ?= bsc
 
 RX_MODULES := m4 m5 m6 m7 m8
 RX_INTEGRATION := rx_integration
+RETX_MODULES := m9 m10 m11
+RETX_INTEGRATION := retx_integration
 
 .PHONY: test test-all test-long test-m0chain test-negative \
 	preflight-rx compile-rx verilog-rx test-rx test-rx-long \
-	production-rx-verilog clean-rx clean
+	production-rx-verilog clean-rx clean \
+	test-retx-contract test-retx-units test-retx-integration test-retx test-retx-all clean-retx
 
 test-all:
 	$(MAKE) -C m0 test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
@@ -20,6 +23,7 @@ test-all:
 	$(MAKE) test-rx SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 	$(MAKE) -C integration test-integration SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 	$(MAKE) -C integration test-m0chain SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) test-retx SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 
 test: test-all
 
@@ -73,6 +77,29 @@ clean-rx:
 		$(MAKE) -C $$module clean; \
 	done
 	$(MAKE) -C $(RX_INTEGRATION) clean
+
+test-retx-contract:
+	$(MAKE) -C retx_contract test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+
+test-retx-units:
+	@set -e; for module in $(RETX_MODULES); do \
+		$(MAKE) -C $$module test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC); \
+	done
+	$(MAKE) -C retx_runtime test PYTHON=$(PYTHON)
+
+test-retx-integration:
+	$(MAKE) -C $(RETX_INTEGRATION) test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+
+test-retx: test-retx-contract test-retx-units test-retx-integration
+
+test-retx-all: test-retx
+	$(MAKE) test-all SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+
+clean-retx:
+	$(MAKE) -C retx_contract clean
+	@set -e; for module in $(RETX_MODULES); do $(MAKE) -C $$module clean; done
+	$(MAKE) -C retx_runtime clean
+	$(MAKE) -C $(RETX_INTEGRATION) clean
 
 clean:
 	$(MAKE) -C m0 clean
