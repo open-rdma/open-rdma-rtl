@@ -1,0 +1,891 @@
+package RetxTypes;
+
+// 由 shared/contracts/retx/tools/generate.py 生成，禁止手工修改。
+
+typedef struct {
+    Bit#(8) version;
+    Bit#(8) flags;
+    Bit#(16) byte_length;
+    Bit#(24) qpn;
+    Bit#(8) reserved0;
+    Bit#(16) qp_epoch;
+    Bit#(16) sack_valid_bits;
+    Bit#(32) report_generation;
+    Bit#(32) scoreboard_generation;
+    Bit#(32) nic_session_id;
+    Bit#(24) ack_psn;
+    Bit#(24) sack_base;
+    Bit#(24) outstanding_base;
+    Bit#(24) nak_psn;
+    Bit#(16) outstanding_count;
+    Bit#(16) ooo_count;
+    Bit#(16) hole_count;
+    Bit#(8) hole_entries_included;
+    Bit#(8) nak_valid_and_code;
+    Bit#(128) sack_bitmap;
+    Bit#(32) crc32;
+} RetxReportHeader deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(24) psn;
+    Bit#(32) record_handle;
+    Bit#(16) request_id;
+    Bit#(18) packet_index;
+    Bit#(18) packet_count;
+    Bit#(25) message_offset;
+    Bit#(13) payload_length;
+    Bit#(64) remote_addr;
+    Bit#(32) remote_key;
+    Bit#(8) opcode;
+    Bit#(3) pmtu;
+    Bit#(18) slot_id;
+    Bit#(2) wire_profile;
+    Bit#(2) ev_profile;
+    Bit#(16) mrc_msn;
+    Bit#(1) msn_valid;
+    Bit#(1) is_first;
+    Bit#(1) is_last;
+    Bit#(26) reserved0;
+} RetxHoleEntry deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(8) version;
+    Bit#(8) flags;
+    Bit#(16) byte_length;
+    Bit#(32) nic_session_id;
+    Bit#(8) entry_count;
+    Bit#(24) reserved0;
+    Bit#(32) header_crc32;
+} RetxRetryBatchHeader deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(32) retry_request_id;
+    Bit#(32) host_session_id;
+    Bit#(24) qpn;
+    Bit#(8) trigger_reason;
+    Bit#(16) qp_epoch;
+    Bit#(8) retry_attempt;
+    Bit#(8) flags;
+    Bit#(24) psn;
+    Bit#(8) reserved0;
+    Bit#(32) record_handle;
+    Bit#(32) report_generation;
+    Bit#(16) expected_request_id;
+    Bit#(24) expected_packet_index;
+    Bit#(24) reserved1;
+    Bit#(32) entry_crc32;
+} RetxRetryEntry deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(8) version;
+    Bit#(8) status;
+    Bit#(16) byte_length;
+    Bit#(32) retry_request_id;
+    Bit#(32) host_session_id;
+    Bit#(32) nic_session_id;
+    Bit#(24) qpn;
+    Bit#(8) reason_code;
+    Bit#(16) qp_epoch;
+    Bit#(16) fetch_id;
+    Bit#(24) psn;
+    Bit#(8) result_sequence;
+    Bit#(32) report_generation;
+    Bit#(32) egress_sequence;
+    Bit#(32) crc32;
+} RetxRetryResult deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(8) version;
+    Bit#(8) reason;
+    Bit#(16) byte_length;
+    Bit#(32) request_id;
+    Bit#(24) qpn;
+    Bit#(8) flags;
+    Bit#(16) qp_epoch;
+    Bit#(16) reserved0;
+    Bit#(32) host_session_id;
+    Bit#(32) nic_session_id;
+    Bit#(32) last_seen_report_generation;
+    Bit#(32) crc32;
+} RetxOnDemandRequest deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(8) version;
+    Bit#(8) flags;
+    Bit#(16) byte_length;
+    Bit#(8) ring_slot;
+    Bit#(8) reserved0;
+    Bit#(16) report_byte_length;
+    Bit#(24) qpn;
+    Bit#(8) reserved1;
+    Bit#(16) qp_epoch;
+    Bit#(16) reserved2;
+    Bit#(32) report_generation;
+    Bit#(32) nic_session_id;
+    Bit#(32) host_session_id;
+    Bit#(32) crc32;
+} RetxNotification deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(8) version;
+    Bit#(8) ring_id;
+    Bit#(8) slot;
+    Bit#(8) flags;
+    Bit#(32) consumer_sequence;
+    Bit#(32) object_identity;
+    Bit#(32) crc32;
+} RetxRingCredit deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(8) version;
+    Bit#(8) roles;
+    Bit#(16) byte_length;
+    Bit#(32) host_session_id;
+    Bit#(32) nic_session_id;
+    Bit#(32) required_caps;
+    Bit#(32) optional_caps;
+    Bit#(16) max_qp;
+    Bit#(16) window;
+    Bit#(16) max_report_bytes;
+    Bit#(8) result_ring_depth;
+    Bit#(8) report_ring_depth;
+    Bit#(8) notification_ring_depth;
+    Bit#(8) ondemand_ring_depth;
+    Bit#(8) retry_ring_depth;
+    Bit#(8) max_batch_entries;
+    Bit#(16) replay_slots;
+    Bit#(8) active_contexts;
+    Bit#(8) retry_limit;
+    Bit#(32) timeout_ns;
+    Bit#(32) stale_ns;
+    Bit#(16) sack_hole_threshold;
+    Bit#(16) reserved0;
+    Bit#(128) schema_hash;
+    Bit#(96) reserved1;
+    Bit#(32) crc32;
+} RetxNegotiationRequest deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(8) version;
+    Bit#(8) result;
+    Bit#(16) byte_length;
+    Bit#(32) host_session_id;
+    Bit#(32) nic_session_id;
+    Bit#(32) supported_caps;
+    Bit#(16) max_qp;
+    Bit#(16) window;
+    Bit#(16) max_report_bytes;
+    Bit#(8) result_ring_depth;
+    Bit#(8) report_ring_depth;
+    Bit#(8) notification_ring_depth;
+    Bit#(8) ondemand_ring_depth;
+    Bit#(8) retry_ring_depth;
+    Bit#(8) max_batch_entries;
+    Bit#(16) replay_slots;
+    Bit#(8) active_contexts;
+    Bit#(8) retry_limit;
+    Bit#(32) timeout_ns;
+    Bit#(32) stale_ns;
+    Bit#(16) sack_hole_threshold;
+    Bit#(16) reserved0;
+    Bit#(128) schema_hash;
+    Bit#(128) reserved1;
+    Bit#(32) crc32;
+} RetxNegotiationResponse deriving(Bits, Eq, FShow);
+
+function Bit#(512) retxPackReportHeader(RetxReportHeader x);
+    return zeroExtend(x.version)
+        | zeroExtend(x.flags) << 8
+        | zeroExtend(x.byte_length) << 16
+        | zeroExtend(x.qpn) << 32
+        | zeroExtend(x.reserved0) << 56
+        | zeroExtend(x.qp_epoch) << 64
+        | zeroExtend(x.sack_valid_bits) << 80
+        | zeroExtend(x.report_generation) << 96
+        | zeroExtend(x.scoreboard_generation) << 128
+        | zeroExtend(x.nic_session_id) << 160
+        | zeroExtend(x.ack_psn) << 192
+        | zeroExtend(x.sack_base) << 216
+        | zeroExtend(x.outstanding_base) << 240
+        | zeroExtend(x.nak_psn) << 264
+        | zeroExtend(x.outstanding_count) << 288
+        | zeroExtend(x.ooo_count) << 304
+        | zeroExtend(x.hole_count) << 320
+        | zeroExtend(x.hole_entries_included) << 336
+        | zeroExtend(x.nak_valid_and_code) << 344
+        | zeroExtend(x.sack_bitmap) << 352
+        | zeroExtend(x.crc32) << 480;
+endfunction
+
+function RetxReportHeader retxUnpackReportHeader(Bit#(512) v);
+    RetxReportHeader x = unpack(0);
+    x.version = truncate(v);
+    x.flags = truncate(v >> 8);
+    x.byte_length = truncate(v >> 16);
+    x.qpn = truncate(v >> 32);
+    x.reserved0 = truncate(v >> 56);
+    x.qp_epoch = truncate(v >> 64);
+    x.sack_valid_bits = truncate(v >> 80);
+    x.report_generation = truncate(v >> 96);
+    x.scoreboard_generation = truncate(v >> 128);
+    x.nic_session_id = truncate(v >> 160);
+    x.ack_psn = truncate(v >> 192);
+    x.sack_base = truncate(v >> 216);
+    x.outstanding_base = truncate(v >> 240);
+    x.nak_psn = truncate(v >> 264);
+    x.outstanding_count = truncate(v >> 288);
+    x.ooo_count = truncate(v >> 304);
+    x.hole_count = truncate(v >> 320);
+    x.hole_entries_included = truncate(v >> 336);
+    x.nak_valid_and_code = truncate(v >> 344);
+    x.sack_bitmap = truncate(v >> 352);
+    x.crc32 = truncate(v >> 480);
+    return x;
+endfunction
+
+function Bit#(320) retxPackHoleEntry(RetxHoleEntry x);
+    return zeroExtend(x.psn)
+        | zeroExtend(x.record_handle) << 24
+        | zeroExtend(x.request_id) << 56
+        | zeroExtend(x.packet_index) << 72
+        | zeroExtend(x.packet_count) << 90
+        | zeroExtend(x.message_offset) << 108
+        | zeroExtend(x.payload_length) << 133
+        | zeroExtend(x.remote_addr) << 146
+        | zeroExtend(x.remote_key) << 210
+        | zeroExtend(x.opcode) << 242
+        | zeroExtend(x.pmtu) << 250
+        | zeroExtend(x.slot_id) << 253
+        | zeroExtend(x.wire_profile) << 271
+        | zeroExtend(x.ev_profile) << 273
+        | zeroExtend(x.mrc_msn) << 275
+        | zeroExtend(x.msn_valid) << 291
+        | zeroExtend(x.is_first) << 292
+        | zeroExtend(x.is_last) << 293
+        | zeroExtend(x.reserved0) << 294;
+endfunction
+
+function RetxHoleEntry retxUnpackHoleEntry(Bit#(320) v);
+    RetxHoleEntry x = unpack(0);
+    x.psn = truncate(v);
+    x.record_handle = truncate(v >> 24);
+    x.request_id = truncate(v >> 56);
+    x.packet_index = truncate(v >> 72);
+    x.packet_count = truncate(v >> 90);
+    x.message_offset = truncate(v >> 108);
+    x.payload_length = truncate(v >> 133);
+    x.remote_addr = truncate(v >> 146);
+    x.remote_key = truncate(v >> 210);
+    x.opcode = truncate(v >> 242);
+    x.pmtu = truncate(v >> 250);
+    x.slot_id = truncate(v >> 253);
+    x.wire_profile = truncate(v >> 271);
+    x.ev_profile = truncate(v >> 273);
+    x.mrc_msn = truncate(v >> 275);
+    x.msn_valid = truncate(v >> 291);
+    x.is_first = truncate(v >> 292);
+    x.is_last = truncate(v >> 293);
+    x.reserved0 = truncate(v >> 294);
+    return x;
+endfunction
+
+function Bit#(128) retxPackRetryBatchHeader(RetxRetryBatchHeader x);
+    return zeroExtend(x.version)
+        | zeroExtend(x.flags) << 8
+        | zeroExtend(x.byte_length) << 16
+        | zeroExtend(x.nic_session_id) << 32
+        | zeroExtend(x.entry_count) << 64
+        | zeroExtend(x.reserved0) << 72
+        | zeroExtend(x.header_crc32) << 96;
+endfunction
+
+function RetxRetryBatchHeader retxUnpackRetryBatchHeader(Bit#(128) v);
+    RetxRetryBatchHeader x = unpack(0);
+    x.version = truncate(v);
+    x.flags = truncate(v >> 8);
+    x.byte_length = truncate(v >> 16);
+    x.nic_session_id = truncate(v >> 32);
+    x.entry_count = truncate(v >> 64);
+    x.reserved0 = truncate(v >> 72);
+    x.header_crc32 = truncate(v >> 96);
+    return x;
+endfunction
+
+function Bit#(320) retxPackRetryEntry(RetxRetryEntry x);
+    return zeroExtend(x.retry_request_id)
+        | zeroExtend(x.host_session_id) << 32
+        | zeroExtend(x.qpn) << 64
+        | zeroExtend(x.trigger_reason) << 88
+        | zeroExtend(x.qp_epoch) << 96
+        | zeroExtend(x.retry_attempt) << 112
+        | zeroExtend(x.flags) << 120
+        | zeroExtend(x.psn) << 128
+        | zeroExtend(x.reserved0) << 152
+        | zeroExtend(x.record_handle) << 160
+        | zeroExtend(x.report_generation) << 192
+        | zeroExtend(x.expected_request_id) << 224
+        | zeroExtend(x.expected_packet_index) << 240
+        | zeroExtend(x.reserved1) << 264
+        | zeroExtend(x.entry_crc32) << 288;
+endfunction
+
+function RetxRetryEntry retxUnpackRetryEntry(Bit#(320) v);
+    RetxRetryEntry x = unpack(0);
+    x.retry_request_id = truncate(v);
+    x.host_session_id = truncate(v >> 32);
+    x.qpn = truncate(v >> 64);
+    x.trigger_reason = truncate(v >> 88);
+    x.qp_epoch = truncate(v >> 96);
+    x.retry_attempt = truncate(v >> 112);
+    x.flags = truncate(v >> 120);
+    x.psn = truncate(v >> 128);
+    x.reserved0 = truncate(v >> 152);
+    x.record_handle = truncate(v >> 160);
+    x.report_generation = truncate(v >> 192);
+    x.expected_request_id = truncate(v >> 224);
+    x.expected_packet_index = truncate(v >> 240);
+    x.reserved1 = truncate(v >> 264);
+    x.entry_crc32 = truncate(v >> 288);
+    return x;
+endfunction
+
+function Bit#(320) retxPackRetryResult(RetxRetryResult x);
+    return zeroExtend(x.version)
+        | zeroExtend(x.status) << 8
+        | zeroExtend(x.byte_length) << 16
+        | zeroExtend(x.retry_request_id) << 32
+        | zeroExtend(x.host_session_id) << 64
+        | zeroExtend(x.nic_session_id) << 96
+        | zeroExtend(x.qpn) << 128
+        | zeroExtend(x.reason_code) << 152
+        | zeroExtend(x.qp_epoch) << 160
+        | zeroExtend(x.fetch_id) << 176
+        | zeroExtend(x.psn) << 192
+        | zeroExtend(x.result_sequence) << 216
+        | zeroExtend(x.report_generation) << 224
+        | zeroExtend(x.egress_sequence) << 256
+        | zeroExtend(x.crc32) << 288;
+endfunction
+
+function RetxRetryResult retxUnpackRetryResult(Bit#(320) v);
+    RetxRetryResult x = unpack(0);
+    x.version = truncate(v);
+    x.status = truncate(v >> 8);
+    x.byte_length = truncate(v >> 16);
+    x.retry_request_id = truncate(v >> 32);
+    x.host_session_id = truncate(v >> 64);
+    x.nic_session_id = truncate(v >> 96);
+    x.qpn = truncate(v >> 128);
+    x.reason_code = truncate(v >> 152);
+    x.qp_epoch = truncate(v >> 160);
+    x.fetch_id = truncate(v >> 176);
+    x.psn = truncate(v >> 192);
+    x.result_sequence = truncate(v >> 216);
+    x.report_generation = truncate(v >> 224);
+    x.egress_sequence = truncate(v >> 256);
+    x.crc32 = truncate(v >> 288);
+    return x;
+endfunction
+
+function Bit#(256) retxPackOnDemandRequest(RetxOnDemandRequest x);
+    return zeroExtend(x.version)
+        | zeroExtend(x.reason) << 8
+        | zeroExtend(x.byte_length) << 16
+        | zeroExtend(x.request_id) << 32
+        | zeroExtend(x.qpn) << 64
+        | zeroExtend(x.flags) << 88
+        | zeroExtend(x.qp_epoch) << 96
+        | zeroExtend(x.reserved0) << 112
+        | zeroExtend(x.host_session_id) << 128
+        | zeroExtend(x.nic_session_id) << 160
+        | zeroExtend(x.last_seen_report_generation) << 192
+        | zeroExtend(x.crc32) << 224;
+endfunction
+
+function RetxOnDemandRequest retxUnpackOnDemandRequest(Bit#(256) v);
+    RetxOnDemandRequest x = unpack(0);
+    x.version = truncate(v);
+    x.reason = truncate(v >> 8);
+    x.byte_length = truncate(v >> 16);
+    x.request_id = truncate(v >> 32);
+    x.qpn = truncate(v >> 64);
+    x.flags = truncate(v >> 88);
+    x.qp_epoch = truncate(v >> 96);
+    x.reserved0 = truncate(v >> 112);
+    x.host_session_id = truncate(v >> 128);
+    x.nic_session_id = truncate(v >> 160);
+    x.last_seen_report_generation = truncate(v >> 192);
+    x.crc32 = truncate(v >> 224);
+    return x;
+endfunction
+
+function Bit#(256) retxPackNotification(RetxNotification x);
+    return zeroExtend(x.version)
+        | zeroExtend(x.flags) << 8
+        | zeroExtend(x.byte_length) << 16
+        | zeroExtend(x.ring_slot) << 32
+        | zeroExtend(x.reserved0) << 40
+        | zeroExtend(x.report_byte_length) << 48
+        | zeroExtend(x.qpn) << 64
+        | zeroExtend(x.reserved1) << 88
+        | zeroExtend(x.qp_epoch) << 96
+        | zeroExtend(x.reserved2) << 112
+        | zeroExtend(x.report_generation) << 128
+        | zeroExtend(x.nic_session_id) << 160
+        | zeroExtend(x.host_session_id) << 192
+        | zeroExtend(x.crc32) << 224;
+endfunction
+
+function RetxNotification retxUnpackNotification(Bit#(256) v);
+    RetxNotification x = unpack(0);
+    x.version = truncate(v);
+    x.flags = truncate(v >> 8);
+    x.byte_length = truncate(v >> 16);
+    x.ring_slot = truncate(v >> 32);
+    x.reserved0 = truncate(v >> 40);
+    x.report_byte_length = truncate(v >> 48);
+    x.qpn = truncate(v >> 64);
+    x.reserved1 = truncate(v >> 88);
+    x.qp_epoch = truncate(v >> 96);
+    x.reserved2 = truncate(v >> 112);
+    x.report_generation = truncate(v >> 128);
+    x.nic_session_id = truncate(v >> 160);
+    x.host_session_id = truncate(v >> 192);
+    x.crc32 = truncate(v >> 224);
+    return x;
+endfunction
+
+function Bit#(128) retxPackRingCredit(RetxRingCredit x);
+    return zeroExtend(x.version)
+        | zeroExtend(x.ring_id) << 8
+        | zeroExtend(x.slot) << 16
+        | zeroExtend(x.flags) << 24
+        | zeroExtend(x.consumer_sequence) << 32
+        | zeroExtend(x.object_identity) << 64
+        | zeroExtend(x.crc32) << 96;
+endfunction
+
+function RetxRingCredit retxUnpackRingCredit(Bit#(128) v);
+    RetxRingCredit x = unpack(0);
+    x.version = truncate(v);
+    x.ring_id = truncate(v >> 8);
+    x.slot = truncate(v >> 16);
+    x.flags = truncate(v >> 24);
+    x.consumer_sequence = truncate(v >> 32);
+    x.object_identity = truncate(v >> 64);
+    x.crc32 = truncate(v >> 96);
+    return x;
+endfunction
+
+function Bit#(640) retxPackNegotiationRequest(RetxNegotiationRequest x);
+    return zeroExtend(x.version)
+        | zeroExtend(x.roles) << 8
+        | zeroExtend(x.byte_length) << 16
+        | zeroExtend(x.host_session_id) << 32
+        | zeroExtend(x.nic_session_id) << 64
+        | zeroExtend(x.required_caps) << 96
+        | zeroExtend(x.optional_caps) << 128
+        | zeroExtend(x.max_qp) << 160
+        | zeroExtend(x.window) << 176
+        | zeroExtend(x.max_report_bytes) << 192
+        | zeroExtend(x.result_ring_depth) << 208
+        | zeroExtend(x.report_ring_depth) << 216
+        | zeroExtend(x.notification_ring_depth) << 224
+        | zeroExtend(x.ondemand_ring_depth) << 232
+        | zeroExtend(x.retry_ring_depth) << 240
+        | zeroExtend(x.max_batch_entries) << 248
+        | zeroExtend(x.replay_slots) << 256
+        | zeroExtend(x.active_contexts) << 272
+        | zeroExtend(x.retry_limit) << 280
+        | zeroExtend(x.timeout_ns) << 288
+        | zeroExtend(x.stale_ns) << 320
+        | zeroExtend(x.sack_hole_threshold) << 352
+        | zeroExtend(x.reserved0) << 368
+        | zeroExtend(x.schema_hash) << 384
+        | zeroExtend(x.reserved1) << 512
+        | zeroExtend(x.crc32) << 608;
+endfunction
+
+function RetxNegotiationRequest retxUnpackNegotiationRequest(Bit#(640) v);
+    RetxNegotiationRequest x = unpack(0);
+    x.version = truncate(v);
+    x.roles = truncate(v >> 8);
+    x.byte_length = truncate(v >> 16);
+    x.host_session_id = truncate(v >> 32);
+    x.nic_session_id = truncate(v >> 64);
+    x.required_caps = truncate(v >> 96);
+    x.optional_caps = truncate(v >> 128);
+    x.max_qp = truncate(v >> 160);
+    x.window = truncate(v >> 176);
+    x.max_report_bytes = truncate(v >> 192);
+    x.result_ring_depth = truncate(v >> 208);
+    x.report_ring_depth = truncate(v >> 216);
+    x.notification_ring_depth = truncate(v >> 224);
+    x.ondemand_ring_depth = truncate(v >> 232);
+    x.retry_ring_depth = truncate(v >> 240);
+    x.max_batch_entries = truncate(v >> 248);
+    x.replay_slots = truncate(v >> 256);
+    x.active_contexts = truncate(v >> 272);
+    x.retry_limit = truncate(v >> 280);
+    x.timeout_ns = truncate(v >> 288);
+    x.stale_ns = truncate(v >> 320);
+    x.sack_hole_threshold = truncate(v >> 352);
+    x.reserved0 = truncate(v >> 368);
+    x.schema_hash = truncate(v >> 384);
+    x.reserved1 = truncate(v >> 512);
+    x.crc32 = truncate(v >> 608);
+    return x;
+endfunction
+
+function Bit#(640) retxPackNegotiationResponse(RetxNegotiationResponse x);
+    return zeroExtend(x.version)
+        | zeroExtend(x.result) << 8
+        | zeroExtend(x.byte_length) << 16
+        | zeroExtend(x.host_session_id) << 32
+        | zeroExtend(x.nic_session_id) << 64
+        | zeroExtend(x.supported_caps) << 96
+        | zeroExtend(x.max_qp) << 128
+        | zeroExtend(x.window) << 144
+        | zeroExtend(x.max_report_bytes) << 160
+        | zeroExtend(x.result_ring_depth) << 176
+        | zeroExtend(x.report_ring_depth) << 184
+        | zeroExtend(x.notification_ring_depth) << 192
+        | zeroExtend(x.ondemand_ring_depth) << 200
+        | zeroExtend(x.retry_ring_depth) << 208
+        | zeroExtend(x.max_batch_entries) << 216
+        | zeroExtend(x.replay_slots) << 224
+        | zeroExtend(x.active_contexts) << 240
+        | zeroExtend(x.retry_limit) << 248
+        | zeroExtend(x.timeout_ns) << 256
+        | zeroExtend(x.stale_ns) << 288
+        | zeroExtend(x.sack_hole_threshold) << 320
+        | zeroExtend(x.reserved0) << 336
+        | zeroExtend(x.schema_hash) << 352
+        | zeroExtend(x.reserved1) << 480
+        | zeroExtend(x.crc32) << 608;
+endfunction
+
+function RetxNegotiationResponse retxUnpackNegotiationResponse(Bit#(640) v);
+    RetxNegotiationResponse x = unpack(0);
+    x.version = truncate(v);
+    x.result = truncate(v >> 8);
+    x.byte_length = truncate(v >> 16);
+    x.host_session_id = truncate(v >> 32);
+    x.nic_session_id = truncate(v >> 64);
+    x.supported_caps = truncate(v >> 96);
+    x.max_qp = truncate(v >> 128);
+    x.window = truncate(v >> 144);
+    x.max_report_bytes = truncate(v >> 160);
+    x.result_ring_depth = truncate(v >> 176);
+    x.report_ring_depth = truncate(v >> 184);
+    x.notification_ring_depth = truncate(v >> 192);
+    x.ondemand_ring_depth = truncate(v >> 200);
+    x.retry_ring_depth = truncate(v >> 208);
+    x.max_batch_entries = truncate(v >> 216);
+    x.replay_slots = truncate(v >> 224);
+    x.active_contexts = truncate(v >> 240);
+    x.retry_limit = truncate(v >> 248);
+    x.timeout_ns = truncate(v >> 256);
+    x.stale_ns = truncate(v >> 288);
+    x.sack_hole_threshold = truncate(v >> 320);
+    x.reserved0 = truncate(v >> 336);
+    x.schema_hash = truncate(v >> 352);
+    x.reserved1 = truncate(v >> 480);
+    x.crc32 = truncate(v >> 608);
+    return x;
+endfunction
+
+// Internal seam types (BSV-only; no host byte layout).
+typedef struct {
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(24) initialPsn;
+    Bit#(1) enable;
+} RetxQpConfigHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(16) requestId;
+    Bit#(24) psnBase;
+    Bit#(18) psnCount;
+    Bit#(18) packetCount;
+    Bit#(3) pmtu;
+    Bit#(25) messageLength;
+    Bit#(64) remoteAddr;
+    Bit#(32) remoteKey;
+    Bit#(8) opcode;
+    Bit#(18) slotId;
+    Bit#(2) wireProfile;
+    Bit#(2) evProfile;
+    Bit#(16) mrcMsn;
+    Bit#(1) msnValid;
+} RetxWqeRegisterHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(1) ok;
+    Bit#(32) recordHandle;
+} RetxWqeRegisterRespHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(24) psn;
+    Bit#(16) requestId;
+    Bit#(18) packetIndex;
+    Bit#(18) packetCount;
+    Bit#(32) recordHandle;
+    Bit#(32) replayHandle;
+} RetxPacketReserveHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(1) ok;
+    Bit#(8) reason;
+    Bit#(32) replayHandle;
+} RetxPacketGrantHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(24) psn;
+    Bit#(18) packetIndex;
+    Bit#(32) recordHandle;
+    Bit#(32) replayHandle;
+    Bit#(32) commitToken;
+} RetxSentEventHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(2) kind;
+    Bit#(24) ackPsn;
+    Bit#(24) sackBase;
+    Bit#(128) sackBitmap;
+    Bit#(16) sackValidBits;
+    Bit#(1) nakValid;
+    Bit#(7) nakCode;
+    Bit#(24) nakPsn;
+    Bit#(16) oooCount;
+    Bit#(24) triggerPsn;
+} RetxFeedbackEventHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(24) psn;
+    Bit#(32) recordHandle;
+} RetxRecordTerminateHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(1) onDemand;
+    Bit#(32) requestId;
+} RetxSnapshotReqHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(32) scoreboardGeneration;
+    Bit#(24) ackPsn;
+    Bit#(24) sackBase;
+    Bit#(16) outstandingCount;
+    Bit#(16) holeCount;
+    Bit#(16) sackValidBits;
+    Bit#(1) nakValid;
+    Bit#(7) nakCode;
+    Bit#(24) nakPsn;
+    Bit#(16) oooCount;
+    Bit#(128) bitmap;
+    Bit#(8) flags;
+    Bit#(8) entryCount;
+} RetxSnapshotHdrHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(32) retryRequestId;
+    Bit#(32) hostSessionId;
+    Bit#(32) nicSessionId;
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(24) psn;
+    Bit#(32) recordHandle;
+    Bit#(16) expectedRequestId;
+    Bit#(18) expectedPacketIndex;
+    Bit#(32) reportGeneration;
+    Bit#(4) triggerReason;
+    Bit#(8) retryAttempt;
+} RetxAdmissionReqHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(1) ok;
+    Bit#(4) status;
+    Bit#(8) reason;
+    Bit#(32) recordHandle;
+    Bit#(32) replayHandle;
+    Bit#(16) requestId;
+    Bit#(18) packetIndex;
+    Bit#(18) packetCount;
+    Bit#(24) psn;
+    Bit#(8) opcode;
+    Bit#(3) pmtu;
+    Bit#(64) remoteAddr;
+    Bit#(32) remoteKey;
+    Bit#(25) messageOffset;
+    Bit#(13) payloadLength;
+    Bit#(1) first;
+    Bit#(1) last;
+    Bit#(2) wireProfile;
+    Bit#(2) evProfile;
+    Bit#(16) mrcMsn;
+} RetxAdmissionGrantHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(16) fetchId;
+    Bit#(32) replayHandle;
+    Bit#(25) offset;
+    Bit#(13) length;
+    Bit#(32) token;
+} RetxFetchReqHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(16) fetchId;
+    Bit#(1024) data;
+    Bit#(128) keep;
+    Bit#(1) sop;
+    Bit#(1) eop;
+    Bit#(1) valid;
+    Bit#(1) last;
+} RetxFetchBeatHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(32) retryRequestId;
+    Bit#(32) hostSessionId;
+    Bit#(32) nicSessionId;
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(24) psn;
+    Bit#(8) status;
+    Bit#(8) reason;
+    Bit#(16) fetchId;
+    Bit#(32) reportGeneration;
+    Bit#(32) egressSequence;
+    Bit#(8) resultSequence;
+} RetxRetryResultHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(8) ringId;
+    Bit#(8) slot;
+    Bit#(32) consumerSequence;
+    Bit#(32) objectIdentity;
+} RetxRingCreditHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(1) onDemand;
+    Bit#(32) requestId;
+    Bit#(24) triggerPsn;
+} RetxReportTriggerHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(32) txnId;
+    Bit#(8) kind;
+    Bit#(16) byteLength;
+    Bit#(8) ringSlot;
+    Bit#(32) reportGeneration;
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(32) nicSessionId;
+    Bit#(32) hostSessionId;
+} RetxReportWriteHdrHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(32) requestId;
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(32) hostSessionId;
+    Bit#(32) nicSessionId;
+    Bit#(32) lastSeenReportGeneration;
+    Bit#(8) reason;
+} RetxOnDemandReqHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(32) txnId;
+    Bit#(8) ringSlot;
+    Bit#(16) reportByteLength;
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(32) reportGeneration;
+    Bit#(32) nicSessionId;
+    Bit#(32) hostSessionId;
+} RetxNotificationHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(512) data;
+    Bit#(64) keep;
+    Bit#(1) sop;
+    Bit#(1) eop;
+    Bit#(8) beatIndex;
+} RetxReportBeatHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(16) requestId;
+    Bit#(24) psn;
+    Bit#(18) packetIndex;
+    Bit#(18) packetCount;
+    Bit#(3) pmtu;
+    Bit#(8) opcode;
+    Bit#(64) remoteAddr;
+    Bit#(32) remoteKey;
+    Bit#(25) messageOffset;
+    Bit#(13) payloadLength;
+    Bit#(1) first;
+    Bit#(1) last;
+    Bit#(2) wireProfile;
+    Bit#(2) evProfile;
+    Bit#(16) mrcMsn;
+    Bit#(32) replayHandle;
+} RetxReplayDescHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(32) replayHandle;
+    Bit#(1024) data;
+    Bit#(128) keep;
+    Bit#(1) sop;
+    Bit#(1) eop;
+    Bit#(1) last;
+    Bit#(8) beatIndex;
+} RetxReplayBeatHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(24) qpn;
+    Bit#(16) qpEpoch;
+    Bit#(16) requestId;
+    Bit#(24) psn;
+    Bit#(18) packetIndex;
+    Bit#(18) packetCount;
+    Bit#(3) pmtu;
+    Bit#(8) opcode;
+    Bit#(64) remoteAddr;
+    Bit#(32) remoteKey;
+    Bit#(25) messageOffset;
+    Bit#(13) payloadLength;
+    Bit#(1) first;
+    Bit#(1) last;
+    Bit#(2) wireProfile;
+    Bit#(2) evProfile;
+    Bit#(16) mrcMsn;
+} RetxM3DescHw deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bit#(16) requestId;
+    Bit#(24) psn;
+    Bit#(1024) data;
+    Bit#(128) keep;
+    Bit#(1) sop;
+    Bit#(1) eop;
+} RetxM3BeatHw deriving(Bits, Eq, FShow);
+
+endpackage

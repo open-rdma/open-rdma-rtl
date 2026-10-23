@@ -1,47 +1,46 @@
 # OpenRDMA-flow
 
-M0–M3 RDMA TX 与 M4–M8 RX 数据通路的分模块自持树。TX 四个模块和 RX 五个 unit
-均各自携带 RTL、tb、cocotb 单测与 Makefile，拷走即用；`integration/` 和 `rx_integration/`
-分别承载 TX 与 RX 的跨模块连接。
+OpenRDMA-flow 是 RDMA TX、RX 与软件协同重传的模块化 BSV/cocotb 树。每个模块仍可在仓库内独立构建，但公共类型和测试基础设施由根级 `shared/` 唯一提供，不再支持把单个模块目录脱离仓库复制运行。
 
-```
+```text
 OpenRDMA-flow/
-├── m0/   TxMvp        GDRP submission → slot/MR/QP 表 → PGT 翻译 → physical DMA chunk 请求流
-├── m1/   DMA          DmaEngine（乱序 completion → 有序 payload）+ DmaPayloadCompactor（→ M2 拍契约）
-├── m2/   PacketAssembly  message → PTU 分片 packet（descriptor 元数据 + payload，不含 wire header）
-├── m3/   MrcTxScheduler 四通道 TX 调度 + EV 路径管理 + Ethernet/IP/UDP/BTH 封装 → 4×EthPacket
-├── integration/       TX M0MessageAdapter + DmaPhaseAIntegration + 端到端 tb/cocotb
-├── m4/   RX PacketBuffer：frame slot、payload storage/read/release
-├── m5/   RX PacketParser：Ethernet/IPv4/UDP/BTH/RETH parser
-├── m6/   RX RQ Bitmap：PSN window、receive bitmap、ACK/SACK/NAK、admission
-├── m7/   RX DMA Placement：packet DMA、completion merge、ordered retire
-├── m8/   RX OrderedQueue：DMA watermark、CQE、Ordered Flag barrier/credit
-└── rx_integration/    RxTop + current TX M2/M3 → RX loopback；不持有 BSV 类型副本
+├── shared/                    公共 BSV、Python、Make、Retx contract/generated 与门禁
+├── m0_doorbell_analysis/      TxMvp：GDRP submission、表查询、PGT 翻译、DMA chunk
+├── m1_dma_engine/             DmaEngine + DmaPayloadCompactor
+├── m2_packet_assembly/        message → PMTU packet descriptor + payload
+├── m3_mrc_tx_scheduler/       四通道调度、EV 管理与 wire encapsulation
+├── m4_rx_packet_buffer/       RX frame slot 与 payload storage
+├── m5_rx_packet_parser/       legacy Ethernet/IPv4/UDP/BTH/RETH parser
+├── m6_rx_rq_bitmap/           PSN window、bitmap、ACK/SACK/NAK
+├── m7_rx_dma_placement/       packet DMA 与 ordered retire
+├── m8_rx_ordered_queue/       DMA watermark、CQE、Ordered Flag
+├── m9_retx_state_manager/     Retx Scoreboard、Record、snapshot、admission
+├── m10_retx_report_engine/    Retx Report 与 notification
+├── m11_retx_retry_engine/     Retry admission、fetch 与抽象 M3 seam
+├── integrations/{tx,rx,retx}/
+├── retx_runtime/              Python reference policy
+├── tools/archify/             纳入版本控制的架构提取工具
+└── reference/rx-mvp-legacy/   只读历史归档，不参与 active build
 ```
+
+目录物理映射只维护在 `shared/make/modules.mk`。所有 module Makefile 复用 `shared/make/bsv-cocotb.mk` 和 `openrdma_flow_tb.sim.runner`。
 
 ## 运行测试
 
-cocotb 测试必须使用安装了 Cocotb 2 的解释器；可先用
-`python3 -c 'import cocotb; print(cocotb.__version__)'` 检查，再通过
-`make test PYTHON=/path/to/python3` 显式指定。默认 `SIM=verilator`，也可使用
-`SIM=icarus`（negative 套件只支持 Icarus）。
+cocotb 必须显式指定安装了 Cocotb 2 的解释器；默认 `SIM=verilator`，negative 套件使用 Icarus。
 
 | 套件 | 命令 | 内容 |
 |---|---|---|
-| m0 单测 | `make -C m0 test` / `make -C m0 test-long` | tx 10 例；long = 4096 submission 随机 |
-| m1 DMA | `make -C m1 test` / `test-long` / `test-negative` | dma 13 例 + long + 16 个 expected-fatal |
-| m1 Quartus RTL | `make -C m1 check-quartus-rtl` / `quartus-synth` | 导出 production QIP/filelist，检查层次闭包与 Quartus 综合 |
-| m1 compactor | `make -C m1 test TARGET=compactor` | 2 例 |
-| m2 单测 | `make -C m2 test` / `make -C m2 test-long` | packetizer 9 例；long = 固定种子随机（长度/PMTU/profile/节流/PSN wrap） |
-| m3 单测 | `make -C m3 test` / `test-long` / `yosys` | scheduler 9 例 + MRC profile 10 例；long = 双 profile 随机 + 路径状态扰动；含 standalone-verilog + yosys |
-| integration | `make -C integration test-integration` / `test-long` | DmaPhaseA 端到端 5 例 + long |
-| m0chain | `make -C integration test-m0chain` / `test-m0chain-long` | 真·m0→m3（GDRP → frame），6 例 + long |
-| RX unit | `make -C m4 test` 等 | M4–M8 五个自持 unit：6 + 3 + 8 + 5 + 9 例；M6 long 增加固定 seed 随机 |
-| RX integration | `make -C rx_integration test` | `RxTop` 5 例 + current TX M2/M3→RX loopback 1 例 |
-| RX 全矩阵 | `make test-rx` / `make test-rx-long` | short 37 例；long 38 例；production 用 `make production-rx-verilog` |
-| negative | `make -C integration test-negative`（SIM=icarus） | 4 个 expected-fatal |
-
-`make -C integration compile/verilog` 会先跑 `preflight`。
+| 全树静态门禁 | `make preflight` | package 唯一性、Python import origin、Retx manifest、归档 checksum |
+| 全部 short | `make test-all PYTHON=/path/to/python` | M0–M11、三套 integration、contract/runtime |
+| 全部 long | `make test-long PYTHON=/path/to/python` | 全部已有 long；Retx contract/runtime/M9–M11/Retx seam 当前为显式 short alias |
+| negative | `make test-negative PYTHON=/path/to/python` | M1 与 TX integration expected-fatal |
+| 单模块 | `make -C m2_packet_assembly test PYTHON=...` | 模块独立入口 |
+| TX integration | `make -C integrations/tx test` | DmaPhaseA + M0 chain |
+| RX integration | `make -C integrations/rx test` | RxTop + TX→RX loopback |
+| Retx seam | `make -C integrations/retx test` | 当前 M9/M10/M11 seam；不是完整 M3/M6/runtime 闭环 |
+| Retx contract | `make -C shared/contracts/retx test` | BSV/Python ABI golden |
+| RX production | `make production-rx-verilog` | `mkRxTop` production Verilog |
 
 ## 两条 wire profile
 
@@ -74,44 +73,23 @@ WriteImm（`C9/CB` + ImmDt + RQMSN）、TSETH、on-wire 的 Reliability SACK/NAC
 integration 的 request-ID 生命周期仍以 `TxCommit` 回收；`TxEgressEvent` 是纯可观测流，四个
 通道的 BFM 与 integration TB 在后台持续排空它（它带反压）。它也不等于 MAC 上线时刻或 RTT 起点。
 
-## 共享类型包（每个模块文件夹自持一份字节一致的副本）
+## 共享源码与生成契约
 
-BSC 按包名查文件，同名包不能在同一编译单元里出现两个不同定义。四个模块文件夹按依赖闭包
-各自携带一份完整类型包副本，互不 import 对方：
+| 唯一来源 | 消费者 |
+|---|---|
+| `shared/bsv/common/CommonTypes.bsv` | M0–M11 与 integration |
+| `shared/bsv/tx/TxTypes.bsv` | M1–M8、TX/RX integration |
+| `shared/bsv/rx/RxTypes.bsv` | M4–M8、RX integration |
+| `shared/generated/retx/bsv/RetxTypes.bsv` | M9–M11、Retx integration |
+| `shared/python/openrdma_flow_tb/` | 全部 cocotb model/BFM/runner |
+| `shared/generated/retx/python/openrdma_flow/retx/codec.py` | contract、M10、Retx integration、runtime |
 
-| 类型包 | 持有者 | 说明 |
-|---|---|---|
-| `CommonTypes.bsv` | m0 m1 m2 m3（4 份） | PipeIn/PipeOut/ServerP/ClientP + mkConnection；四副本字节一致 |
-| `TxTypes.bsv`（phasea 版） | m1 m2 m3（3 份） | MessageContext/PacketDescriptor/MessagePayloadBeat/EthPacket/…；`TxPsnCount` 为 18-bit |
-| `TxMvpTypes.bsv` | m0（1 份） | M0 自身标量类型 + TxDmaReadRequest |
-| `DmaTypes.bsv` | m1（1 份） | M1 自身类型 |
+`shared/contracts/retx/schema.py` 是 Retx ABI 手写权威。普通 build 只运行确定性 `--check`；只有 `make generate-retx` 更新提交入库的生成物。`make clean` 不删除生成契约。
 
-`integration/Makefile` 的 `preflight`（`cmp`）门保证 CommonTypes×4、TxTypes×3、m2/m3 Python
-mirrors，以及 `model/common.py`/`lib/cocotb_bsv/*.py`×5 在任何编译前字节一致——副本一旦漂移，
-integration 的 -p 包选择或 cocotb packing/driver 行为就会变成顺序相关、静默错误。
+`preflight` 不再比较副本，而是拒绝 active tree 中重新出现同名共享 package、Python mirror、旧目录或漂移生成物。`reference/rx-mvp-legacy/` 明确排除。
 
-同步规则：只允许整树一致的修改（例如给 `CommonTypes.bsv` 加类型时四个副本要一起改）。
-模块内只有一份的类型（DmaTypes/TxMvpTypes）没有门，改起来最自由。
+## 交付边界
 
-顶层五个 RX unit 维护独立的共享闭包与门禁：各自持有 current TX M2 版本的
-`CommonTypes.bsv`、`TxTypes.bsv` 和 byte-identical `RxTypes.bsv`；`rx_integration/` 不持有 BSV
-类型副本。RX preflight 只比较 current TX M2/M3 与 RX 副本，不依赖 TX M1，因此不会绕过、也不会被
-TX integration 自己的既有门禁状态干扰。详细边界见 `RX_README.md`。
+模块保持源码职责隔离和仓库内独立 `make -C`，但依赖同仓库 `shared/`。如需可搬运单模块包，应后续提供显式 export/bundle target，而不是恢复长期复制。
 
-## python 镜像与自持
-
-每个文件夹 `cocotb/` 自持其测试所需的全部 python（bfm/model 镜像 + `lib/cocotb_bsv`）。
-两个生态（mvp 的 dma/tx 镜像与 phasea 的 m2/m3 镜像）的共享基础件差异是纯追加的：
-`model/common.py` 与 `lib/cocotb_bsv` 用的是 phasea 超集版本（多 Bit9/Bit48、
-ActionValueMethod），五个文件夹内容一致，能同时服务两套套件。`legacy_frame.py` 已无引用者，
-未复制。
-
-## 来源
-
-由 `~/Desktop/Design/open-rdma-design`（paper-ji + implementation-taping 合并工作区）整理而来；
-原仓库原样保留。模块文件 = 上游源码 + 本次联调新增/修复（无未提交改动丢失）；
-integration 的 m0chain 套件等为本轮新增。本树不依赖原仓库路径，单独拷贝后可在任何位置运行
-（integration 需要与 m0..m3 同级目录）。
-
-RX 从原 `mvp/rx` 迁入并重构为同样的自持布局；旧 fixed-baseline 文档、验证记录和 upstream 快照
-保存在 `reference/rx-mvp-legacy/`，不参与 active build。
+Retx 当前实现仍是 ABI + M9/M10/M11 功能子集 + RetxTop seam。它尚未真实连接 M3/M6，也未在 cocotb 联合路径调用 `retx_runtime.Runtime`。

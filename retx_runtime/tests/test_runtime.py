@@ -1,15 +1,9 @@
 """retx_runtime reference tests (stdlib unittest)."""
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT.parent / "retx_contract" / "python"))
-
-from retx_codec import encode  # noqa: E402
+from openrdma_flow.retx.codec import encode  # noqa: E402
 from runtime import Runtime, TIMEOUT_NS  # noqa: E402
 
 

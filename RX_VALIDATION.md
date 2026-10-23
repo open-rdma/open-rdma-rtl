@@ -7,7 +7,7 @@
 本记录描述迁移到 `OpenRDMA-flow/` 顶层的 RX active tree：
 
 - 五个与 TX `m0`–`m3` 同级的自持 RX unit；
-- `rx_integration/src/RxTop.bsv`；
+- `integrations/rx/src/RxTop.bsv`；
 - current TX M2/M3 → RX legacy loopback；
 - RX 共享 BSV/Python 副本门禁；
 - `mkRxTop` production Verilog。
@@ -27,7 +27,7 @@
 执行：
 
 ```bash
-make -C OpenRDMA-flow preflight-rx
+make -C OpenRDMA-flow preflight
 make -C OpenRDMA-flow compile-rx \
     PYTHON=/home/mmhh/miniconda3/envs/cocotb2/bin/python
 make -C OpenRDMA-flow verilog-rx \
@@ -41,8 +41,8 @@ make -C OpenRDMA-flow verilog-rx \
 - RX M4–M8 的 `CommonTypes.bsv`、`TxTypes.bsv` 与 current TX M2 canonical copy 一致；
 - current TX M2/M3 的上述共享 package 一致；
 - 五份 `RxTypes.bsv` byte-identical；
-- unit/`rx_integration` 的 RX Python mirror、wire model、BFM helper 和 `lib/cocotb_bsv` 一致；
-- `rx_integration` 的 `model/m2.py`、`model/m3.py` 与 current TX 对应副本一致。
+- 本记录执行时，unit/集成目录中的 RX Python mirror、wire model、BFM helper 和 `cocotb_bsv` 副本一致；
+- 2026-10-23 重构后，上述副本已收敛到 `shared/python/openrdma_flow_tb`，由 import-origin 门禁替代 `cmp`。
 
 删除旧 `mvp/rx` 并去掉 `OpenRDMA-flow/rx` 中间层后，已再次执行 preflight、compile、verilog、两个 simulator short matrix、Icarus long 和 production elaboration；active Makefile、runner、BSV 和 Python 文件中未发现旧层级、`mvp/cocotb`、legacy `upstream` 或 reference archive 路径依赖。
 
@@ -113,9 +113,9 @@ RX M6 的第 9 例使用固定 seed `0x52444D41`，覆盖 FIRST/MIDDLE/LAST reor
 loopback 已从旧 snapshot 切换到 current TX，因此额外执行：
 
 ```bash
-make -C OpenRDMA-flow/m2 test SIM=verilator \
+make -C OpenRDMA-flow/m2_packet_assembly test SIM=verilator \
     PYTHON=/home/mmhh/miniconda3/envs/cocotb2/bin/python
-make -C OpenRDMA-flow/m3 test SIM=verilator \
+make -C OpenRDMA-flow/m3_mrc_tx_scheduler test SIM=verilator \
     PYTHON=/home/mmhh/miniconda3/envs/cocotb2/bin/python
 ```
 
@@ -138,7 +138,7 @@ make -C OpenRDMA-flow production-rx-verilog \
 结果：成功生成：
 
 ```text
-OpenRDMA-flow/rx_integration/build/production/verilog/mkRxTop.v
+OpenRDMA-flow/integrations/rx/build/production/verilog/mkRxTop.v
 ```
 
 生成文件为 21,058 行；无 BSC compilation 或 elaboration error。
@@ -147,10 +147,4 @@ OpenRDMA-flow/rx_integration/build/production/verilog/mkRxTop.v
 
 BSC 仍报告原 RX 实现已有的 rule urgency/action shadowing warning；Verilator 仍报告 BSC primitive 中的 width/case warning。上述 warning 未升级为 error，双 simulator 结果一致。
 
-顶层 TX integration 的原有门禁仍报告：
-
-```text
-CommonTypes.bsv (m0 vs m1) diverged
-```
-
-这是本次迁移前已存在的 M1 `CommonTypes.bsv` 注释级 byte drift。本次没有修改 M1、没有放宽 TX preflight，也没有把该文件纳入 RX BSC path；RX 专用 preflight 和全部 RX 验收均独立通过。
+该记录中的 `CommonTypes.bsv (m0 vs m1) diverged` 是 2026-09-27 的历史状态，后续提交已经归一化。2026-10-23 重构进一步删除全部模块副本，当前权威为 `shared/bsv/common/CommonTypes.bsv`，根级 `make preflight` 验证 active package 唯一性。

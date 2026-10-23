@@ -1,110 +1,119 @@
-# Convenience wrapper: run every suite. Each module folder keeps its own
-# self-contained Makefile; this file only dispatches into them.
+# OpenRDMA-flow 根调度入口；目录映射只定义在 shared/make/modules.mk。
+include $(abspath shared/make/modules.mk)
+
 PYTHON ?= python3
 SIM ?= verilator
 BSC ?= bsc
 
-RX_MODULES := m4 m5 m6 m7 m8
-RX_INTEGRATION := rx_integration
-RETX_MODULES := m9 m10 m11
-RETX_INTEGRATION := retx_integration
+TX_MODULES := $(M0_DIR) $(M1_DIR) $(M2_DIR) $(M3_DIR)
+RX_MODULES := $(M4_DIR) $(M5_DIR) $(M6_DIR) $(M7_DIR) $(M8_DIR)
+RETX_MODULES := $(M9_DIR) $(M10_DIR) $(M11_DIR)
+ALL_MODULES := $(TX_MODULES) $(RX_MODULES) $(RETX_MODULES)
+ALL_INTEGRATIONS := $(TX_INTEGRATION_DIR) $(RX_INTEGRATION_DIR) $(RETX_INTEGRATION_DIR)
 
-.PHONY: test test-all test-long test-m0chain test-negative \
-	preflight-rx compile-rx verilog-rx test-rx test-rx-long \
-	production-rx-verilog clean-rx clean \
-	test-retx-contract test-retx-units test-retx-integration test-retx test-retx-all clean-retx
+.PHONY: preflight generate-retx test test-all test-long test-negative \
+	compile-rx verilog-rx test-rx test-rx-long production-rx-verilog \
+	test-retx-contract test-retx-units test-retx-integration test-retx \
+	test-retx-all clean-rx clean-retx clean
 
-test-all:
-	$(MAKE) -C m0 test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
-	$(MAKE) -C m1 test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
-	$(MAKE) -C m1 test TARGET=compactor SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
-	$(MAKE) -C m2 test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
-	$(MAKE) -C m3 test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+preflight:
+	FLOW_ROOT=$(FLOW_ROOT) RETX_GENERATED_DIR=$(RETX_GENERATED_DIR) \
+		PYTHONPATH="$(FLOW_PYTHONPATH)$${PYTHONPATH:+:$${PYTHONPATH}}" \
+		$(PYTHON) shared/tools/preflight.py
+
+generate-retx:
+	$(MAKE) -C $(RETX_CONTRACT_DIR) generate PYTHON=$(PYTHON)
+
+test-all: preflight
+	$(MAKE) -C $(M0_DIR) test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(M1_DIR) test TARGET=dma SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(M1_DIR) test TARGET=compactor SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(M2_DIR) test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(M3_DIR) test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 	$(MAKE) test-rx SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
-	$(MAKE) -C integration test-integration SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
-	$(MAKE) -C integration test-m0chain SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(TX_INTEGRATION_DIR) test-integration SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(TX_INTEGRATION_DIR) test-m0chain SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 	$(MAKE) test-retx SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 
 test: test-all
 
-test-long:
-	$(MAKE) -C m0 test-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
-	$(MAKE) -C m1 test-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
-	$(MAKE) -C m2 test-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
-	$(MAKE) -C m3 test-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+test-long: preflight
+	$(MAKE) -C $(M0_DIR) test-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(M1_DIR) test-long TARGET=dma SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(M1_DIR) test-long TARGET=compactor SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(M2_DIR) test-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(M3_DIR) test-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 	$(MAKE) test-rx-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
-	$(MAKE) -C integration test-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
-	$(MAKE) -C integration test-m0chain-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(TX_INTEGRATION_DIR) test-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(TX_INTEGRATION_DIR) test-m0chain-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(RETX_CONTRACT_DIR) test-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	@set -e; for module in $(RETX_MODULES); do \
+		$(MAKE) -C $$module test-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC); \
+	done
+	$(MAKE) -C $(RETX_RUNTIME_DIR) test-long PYTHON=$(PYTHON)
+	$(MAKE) -C $(RETX_INTEGRATION_DIR) test-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 
-test-negative:
-	$(MAKE) -C m1 test-negative SIM=icarus PYTHON=$(PYTHON) BSC=$(BSC)
-	$(MAKE) -C integration test-negative SIM=icarus PYTHON=$(PYTHON) BSC=$(BSC)
+test-negative: preflight
+	$(MAKE) -C $(M1_DIR) test-negative TARGET=dma SIM=icarus PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(TX_INTEGRATION_DIR) test-negative TARGET=integration SIM=icarus PYTHON=$(PYTHON) BSC=$(BSC)
 
-preflight-rx:
-	$(MAKE) -C $(RX_INTEGRATION) preflight BSC=$(BSC)
-
-compile-rx: preflight-rx
+compile-rx: preflight
 	@set -e; for module in $(RX_MODULES); do \
 		$(MAKE) -C $$module compile BSC=$(BSC) PYTHON=$(PYTHON); \
 	done
-	$(MAKE) -C $(RX_INTEGRATION) compile TARGET=rx_top BSC=$(BSC) PYTHON=$(PYTHON)
-	$(MAKE) -C $(RX_INTEGRATION) compile TARGET=tx_rx_loopback BSC=$(BSC) PYTHON=$(PYTHON)
+	$(MAKE) -C $(RX_INTEGRATION_DIR) compile TARGET=rx_top BSC=$(BSC) PYTHON=$(PYTHON)
+	$(MAKE) -C $(RX_INTEGRATION_DIR) compile TARGET=tx_rx_loopback BSC=$(BSC) PYTHON=$(PYTHON)
 
-verilog-rx: preflight-rx
+verilog-rx: preflight
 	@set -e; for module in $(RX_MODULES); do \
 		$(MAKE) -C $$module verilog BSC=$(BSC) PYTHON=$(PYTHON); \
 	done
-	$(MAKE) -C $(RX_INTEGRATION) verilog TARGET=rx_top BSC=$(BSC) PYTHON=$(PYTHON)
-	$(MAKE) -C $(RX_INTEGRATION) verilog TARGET=tx_rx_loopback BSC=$(BSC) PYTHON=$(PYTHON)
+	$(MAKE) -C $(RX_INTEGRATION_DIR) verilog TARGET=rx_top BSC=$(BSC) PYTHON=$(PYTHON)
+	$(MAKE) -C $(RX_INTEGRATION_DIR) verilog TARGET=tx_rx_loopback BSC=$(BSC) PYTHON=$(PYTHON)
 
-test-rx: preflight-rx
+test-rx: preflight
 	@set -e; for module in $(RX_MODULES); do \
 		$(MAKE) -C $$module test SIM=$(SIM) BSC=$(BSC) PYTHON=$(PYTHON); \
 	done
-	$(MAKE) -C $(RX_INTEGRATION) test SIM=$(SIM) BSC=$(BSC) PYTHON=$(PYTHON)
+	$(MAKE) -C $(RX_INTEGRATION_DIR) test SIM=$(SIM) BSC=$(BSC) PYTHON=$(PYTHON)
 
-test-rx-long: preflight-rx
+test-rx-long: preflight
 	@set -e; for module in $(RX_MODULES); do \
 		$(MAKE) -C $$module test-long SIM=$(SIM) BSC=$(BSC) PYTHON=$(PYTHON); \
 	done
-	$(MAKE) -C $(RX_INTEGRATION) test-long SIM=$(SIM) BSC=$(BSC) PYTHON=$(PYTHON)
+	$(MAKE) -C $(RX_INTEGRATION_DIR) test-long SIM=$(SIM) BSC=$(BSC) PYTHON=$(PYTHON)
 
-production-rx-verilog: preflight-rx
-	$(MAKE) -C $(RX_INTEGRATION) production-verilog BSC=$(BSC) PYTHON=$(PYTHON)
-
-clean-rx:
-	@set -e; for module in $(RX_MODULES); do \
-		$(MAKE) -C $$module clean; \
-	done
-	$(MAKE) -C $(RX_INTEGRATION) clean
+production-rx-verilog: preflight
+	$(MAKE) -C $(RX_INTEGRATION_DIR) production-verilog BSC=$(BSC) PYTHON=$(PYTHON)
 
 test-retx-contract:
-	$(MAKE) -C retx_contract test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(RETX_CONTRACT_DIR) test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 
 test-retx-units:
 	@set -e; for module in $(RETX_MODULES); do \
 		$(MAKE) -C $$module test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC); \
 	done
-	$(MAKE) -C retx_runtime test PYTHON=$(PYTHON)
+	$(MAKE) -C $(RETX_RUNTIME_DIR) test PYTHON=$(PYTHON)
 
 test-retx-integration:
-	$(MAKE) -C $(RETX_INTEGRATION) test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(RETX_INTEGRATION_DIR) test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 
-test-retx: test-retx-contract test-retx-units test-retx-integration
+test-retx: preflight test-retx-contract test-retx-units test-retx-integration
 
-test-retx-all: test-retx
-	$(MAKE) test-all SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+test-retx-all: test-all
+
+clean-rx:
+	@set -e; for module in $(RX_MODULES); do $(MAKE) -C $$module clean; done
+	$(MAKE) -C $(RX_INTEGRATION_DIR) clean
 
 clean-retx:
-	$(MAKE) -C retx_contract clean
 	@set -e; for module in $(RETX_MODULES); do $(MAKE) -C $$module clean; done
-	$(MAKE) -C retx_runtime clean
-	$(MAKE) -C $(RETX_INTEGRATION) clean
+	$(MAKE) -C $(RETX_CONTRACT_DIR) clean
+	$(MAKE) -C $(RETX_RUNTIME_DIR) clean
+	$(MAKE) -C $(RETX_INTEGRATION_DIR) clean
 
 clean:
-	$(MAKE) -C m0 clean
-	$(MAKE) -C m1 clean
-	$(MAKE) -C m2 clean
-	$(MAKE) -C m3 clean
-	$(MAKE) clean-rx
-	$(MAKE) -C integration clean
+	@set -e; for module in $(ALL_MODULES); do $(MAKE) -C $$module clean; done
+	@set -e; for integration in $(ALL_INTEGRATIONS); do $(MAKE) -C $$integration clean; done
+	$(MAKE) -C $(RETX_CONTRACT_DIR) clean
+	$(MAKE) -C $(RETX_RUNTIME_DIR) clean

@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from retx_codec import (decode, encode, validate_report)
+from openrdma_flow.retx.codec import (decode, encode, validate_report)
 
 QP_COUNT = 4
 WINDOW = 16

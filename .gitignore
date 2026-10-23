@@ -15,3 +15,5 @@ __pycache__/
 .claude/
 _bmad/
 _bmad-output/
+# Claude Remote Notifier runtime
+.claude/claude-remote-notifier/
