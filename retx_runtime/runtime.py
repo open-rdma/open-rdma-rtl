@@ -51,9 +51,9 @@ class Runtime:
     host_session_id: int
     nic_session_id: int = 0
     now_ns: int = 0
-    caches: dict[int, QpCache] = field(default_factory=lambda: {q: QpCache() for q in range(QP_COUNT)})
+    caches: dict[int, QpCache] = field(default_factory=dict)
     deadlines: dict[int, int] = field(default_factory=dict)
-    deadline_armed: dict[int, bool] = field(default_factory=lambda: {q: False for q in range(QP_COUNT)})
+    deadline_armed: dict[int, bool] = field(default_factory=dict)
     pending: dict[tuple[int, int, int], PendingRetry] = field(default_factory=dict)
     next_request_id: int = 1
     ondemand_requests: list[dict[str, Any]] = field(default_factory=list)
@@ -73,8 +73,11 @@ class Runtime:
             return False
         qpn = notification["qpn"]
         if qpn not in self.caches:
-            self._count("unknown_qp")
-            return False
+            # QPN values are arbitrary; NIC slots are what is capped.
+            if len(self.caches) >= QP_COUNT:
+                self._count("too_many_contexts")
+                return False
+            self.caches[qpn] = QpCache()
         try:
             values = decode("ReportHeader", report_bytes)
             values = validate_report(values)
@@ -112,6 +115,36 @@ class Runtime:
 
     def _generation_newer(self, new: int, old: int) -> bool:
         return new != old and ((new - old) & 0xFFFFFFFF) < 0x80000000
+
+    # -- Host CPU report path ----------------------------------------------
+    def ingest_report(
+        self,
+        notification: dict[str, Any],
+        report_bytes: bytes,
+        holes: list[dict[str, Any]] | None = None,
+    ) -> bool:
+        """Ingest a NIC notification plus report body, as the CPU would.
+
+        Hole entries travel beside the header in the ABI; attach them to the
+        report generation so later retry requests can carry the packet
+        metadata the NIC needs for admission and replay fetch.
+        """
+        for entry in holes or []:
+            self.attach_hole(
+                notification["qpn"], notification["report_generation"], entry
+            )
+        return self.ingest_notification(notification, report_bytes)
+
+    def plan_retries(self, qpn: int) -> list[dict[str, Any]]:
+        """Turn the cached report's holes into ready retry requests.
+
+        The loss policy (SACK hole threshold, NAK, timeout) stays in
+        ``decisions``/``service``; this is the report-driven fast path a CPU
+        uses right after ingesting a fresh report.
+        """
+        for decision in self.decisions(qpn):
+            self._queue(decision)
+        return self._assemble_requests()
 
     def _rearm_or_cancel(self, qpn: int, values: dict[str, Any]) -> None:
         if values["outstanding_count"] == 0:
@@ -172,10 +205,14 @@ class Runtime:
         emitted: list[dict[str, Any]] = []
         checked_qps = 0
         bit_budget = SCAN_BIT_BUDGET
-        for step in range(QP_COUNT):
-            qpn = (self.qp_cursor + step) % QP_COUNT
+        keys = sorted(self.caches)
+        if not keys:
+            return emitted
+        start = self.qp_cursor % len(keys)
+        for step in range(min(QP_COUNT, len(keys))):
             if checked_qps >= SCAN_QP_BUDGET:
                 break
+            qpn = keys[(start + step) % len(keys)]
             checked_qps += 1
             cache = self.caches[qpn]
             if cache.needs_refresh:
@@ -197,7 +234,7 @@ class Runtime:
                     break
                 bit_budget -= 1
                 self._queue(decision)
-        self.qp_cursor = (self.qp_cursor + 1) % QP_COUNT
+        self.qp_cursor = (start + 1) % len(keys)
         emitted = self._assemble_requests()
         return emitted
 

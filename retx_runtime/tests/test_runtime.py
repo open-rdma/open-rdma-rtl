@@ -96,6 +96,29 @@ class RuntimeTest(unittest.TestCase):
         self.rt.service()
         self.assertTrue(self.rt.ondemand_requests)
 
+    def test_report_driven_fast_retry_carries_hole_metadata(self):
+        values, data = report(
+            report_generation=6, sack_bitmap=0b1110, hole_count=1,
+            hole_entries_included=1,
+        )
+        holes = [hole(101, packet_index=1)]
+        self.assertTrue(self.rt.ingest_report(notification(values), data, holes))
+        requests = self.rt.plan_retries(0)
+        self.assertEqual(len(requests), 1)
+        req = requests[0]
+        self.assertEqual(
+            (req["psn"], req["trigger_reason"], req["record_handle"],
+             req["expected_request_id"], req["expected_packet_index"]),
+            (101, 2, 7, 42, 1),
+        )
+        self.assertEqual(self.rt.plan_retries(0), [])
+
+    def test_qpn_is_not_limited_to_slot_index(self):
+        values, data = report(qpn=7, report_generation=8)
+        self.assertTrue(self.rt.ingest_notification(notification(values), data))
+        self.assertIn(7, self.rt.caches)
+
+
 
 if __name__ == "__main__":
     unittest.main()

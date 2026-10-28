@@ -8,6 +8,7 @@ package PacketAssembly;
 
 import Assert :: *;
 import FIFOF :: *;
+import SpecialFIFOs :: *;
 import Vector :: *;
 
 import CommonTypes :: *;
@@ -206,9 +207,45 @@ endmodule
 typedef enum {
     P_IDLE,
     P_DESCRIPTOR,
-    P_PAYLOAD,
-    P_FLUSH
+    P_PAYLOAD
 } PacketizerState deriving(Bits, Eq, FShow);
+
+// descriptor 构造保持纯组合；startMessage 已验证整段 remote range，
+// 后续 packet 的 offset 因此也不会溢出。
+function PacketDescriptor buildPacketDescriptor(
+    MessageContext ctx,
+    TxPsnCount index,
+    TxPsnCount count,
+    TxLength offset,
+    Bit#(13) payloadLength);
+    Bit#(1) isFirst = pack(index == 0);
+    Bit#(1) isLast = pack(index + 1 == count);
+    Bit#(64) remoteAddr = ctx.remoteAddr + zeroExtend(offset);
+    return PacketDescriptor {
+        requestId: ctx.requestId,
+        qpn: ctx.qpn,
+        destQpn: ctx.destQpn,
+        slotId: ctx.slotId,
+        debugSeq: ctx.debugSeq,
+        pmtu: ctx.pmtu,
+        psn: ctx.startPsn + zeroExtend(index),
+        packetIndex: index,
+        packetCount: count,
+        opcode: packetOpcodeForProfile(ctx.wireProfile, isFirst, isLast),
+        remoteAddr: remoteAddr,
+        remoteKey: ctx.remoteKey,
+        messageOffset: offset,
+        payloadLength: payloadLength,
+        messageLength: ctx.len,
+        isFirst: isFirst,
+        isLast: isLast,
+        trafficClass: TRAFFIC_FIRST,
+        wireProfile: ctx.wireProfile,
+        evProfileId: ctx.evProfileId,
+        mrcMsn: ctx.mrcMsn,
+        mrcMsnValid: ctx.mrcMsnValid
+    };
+endfunction
 
 interface PacketAssemblyEngineIfc;
     interface PipeIn#(MessageContext) contextIn;
@@ -230,15 +267,18 @@ module mkPacketAssemblyEngine(PacketAssemblyEngineIfc);
 
     FIFOF#(MessageContext) contextQ <- mkSizedFIFOF(8);
     FIFOF#(PacketDescriptor) descriptorQ <- mkSizedFIFOF(2);
-    FIFOF#(PacketPayloadBeat) payloadQ <- mkSizedFIFOF(2);
+    FIFOF#(PacketPayloadBeat) payloadQ <- mkPipelineFIFOF;
     ByteAlignerIfc aligner <- mkByteAligner;
 
-    rule startMessage (state == P_IDLE && contextQ.notEmpty);
+    rule startMessage (state == P_IDLE && contextQ.notEmpty &&
+                       descriptorQ.notFull);
         let ctx = contextQ.first;
         let count = packetCountForContext(ctx);
         Bit#(65) remoteEnd = zeroExtend(ctx.remoteAddr) +
             zeroExtend(ctx.len) - 1;
         dynamicAssert(ctx.len != 0, "M2 zero-length messages are unsupported");
+        dynamicAssert(aligner.residualBytes == 0,
+            "M2 stale aligner residual at message start");
         dynamicAssert(remoteEnd[64] == 0, "M2 remote address range overflow");
         dynamicAssert(ctx.pmtu <= 4, "M2 invalid PMTU code");
         dynamicAssert(isSupportedWireProfile(ctx.wireProfile),
@@ -264,43 +304,25 @@ module mkPacketAssemblyEngine(PacketAssemblyEngineIfc);
             ctx.wireProfile, ctx.pmtu, 1);
         Bit#(25) firstLength =
             ctx.len < zeroExtend(firstLimit) ? ctx.len : zeroExtend(firstLimit);
-        packetRemaining <= truncate(firstLength);
-        packetPayloadLength <= truncate(firstLength);
-        state <= P_DESCRIPTOR;
+        Bit#(13) firstPayloadLength = truncate(firstLength);
+        packetRemaining <= firstPayloadLength;
+        packetPayloadLength <= firstPayloadLength;
+        descriptorQ.enq(buildPacketDescriptor(
+            ctx, 0, count, 0, firstPayloadLength));
+        state <= P_PAYLOAD;
     endrule
 
     rule emitDescriptor (state == P_DESCRIPTOR && descriptorQ.notFull);
-        Bit#(1) isFirst = pack(packetIndex == 0);
-        Bit#(1) isLast = pack(packetIndex + 1 == packetCount);
         Bit#(65) remoteAddrWide = zeroExtend(ctxLatch.remoteAddr) +
             zeroExtend(messageOffset);
         dynamicAssert(remoteAddrWide[64] == 0,
             "M2 remote address overflow");
-        descriptorQ.enq(PacketDescriptor {
-            requestId: ctxLatch.requestId,
-            qpn: ctxLatch.qpn,
-            destQpn: ctxLatch.destQpn,
-            slotId: ctxLatch.slotId,
-            debugSeq: ctxLatch.debugSeq,
-            pmtu: ctxLatch.pmtu,
-            psn: ctxLatch.startPsn + zeroExtend(packetIndex),
-            packetIndex: packetIndex,
-            packetCount: packetCount,
-            opcode: packetOpcodeForProfile(
-                ctxLatch.wireProfile, isFirst, isLast),
-            remoteAddr: truncate(remoteAddrWide),
-            remoteKey: ctxLatch.remoteKey,
-            messageOffset: messageOffset,
-            payloadLength: packetPayloadLength,
-            messageLength: ctxLatch.len,
-            isFirst: isFirst,
-            isLast: isLast,
-            trafficClass: TRAFFIC_FIRST,
-            wireProfile: ctxLatch.wireProfile,
-            evProfileId: ctxLatch.evProfileId,
-            mrcMsn: ctxLatch.mrcMsn,
-            mrcMsnValid: ctxLatch.mrcMsnValid
-        });
+        descriptorQ.enq(buildPacketDescriptor(
+            ctxLatch,
+            packetIndex,
+            packetCount,
+            messageOffset,
+            packetPayloadLength));
         state <= P_PAYLOAD;
     endrule
 
@@ -330,7 +352,9 @@ module mkPacketAssemblyEngine(PacketAssemblyEngineIfc);
 
         if (packetEnd) begin
             if (messageLeft == 0) begin
-                state <= P_FLUSH;
+                // 最后一次 request 精确消费 canonical EOP，aligner residual
+                // 已经为空，因此直接返回 idle，不再插入固定气泡。
+                state <= P_IDLE;
             end else begin
                 Bit#(13) limit = packetPayloadLimitForProfile(
                     ctxLatch.wireProfile, ctxLatch.pmtu, 0);
@@ -344,11 +368,6 @@ module mkPacketAssemblyEngine(PacketAssemblyEngineIfc);
         end else begin
             packetRemaining <= packetRemaining - zeroExtend(requested);
         end
-    endrule
-
-    rule finishMessage (state == P_FLUSH);
-        aligner.flush;
-        state <= P_IDLE;
     endrule
 
     interface contextIn = toPipeIn(contextQ);

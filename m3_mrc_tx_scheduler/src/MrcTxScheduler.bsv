@@ -4,8 +4,10 @@ package MrcTxScheduler;
 
 import Assert :: *;
 import BRAMCore :: *;
+import ConfigReg :: *;
 import Connectable :: *;
 import FIFOF :: *;
+import SpecialFIFOs :: *;
 import Vector :: *;
 
 import CommonTypes :: *;
@@ -43,7 +45,7 @@ module mkChannelEncapsulator#(Bit#(2) channel)(ChannelEncapsulatorIfc);
     // Port A stores ingress beats while port B independently serves this channel.
     BRAM_DUAL_PORT#(Bit#(6), Bit#(1024)) payloadMem <- mkBRAMCore2(64, False);
     FIFOF#(BufferedPacket) packetQ <- mkSizedFIFOF(2);
-    FIFOF#(EthPacket) frameQ <- mkSizedFIFOF(2);
+    FIFOF#(EthPacket) frameQ <- mkPipelineFIFOF;
     FIFOF#(TxEgressEvent) egressQ <- mkSizedFIFOF(2);
 
     Reg#(EncoderState) state <- mkReg(E_IDLE);
@@ -55,10 +57,13 @@ module mkChannelEncapsulator#(Bit#(2) channel)(ChannelEncapsulatorIfc);
     Reg#(Bit#(2)) padRemaining <- mkReg(0);
     Reg#(Bit#(13)) payloadRemaining <- mkReg(0);
     Reg#(Bit#(1024)) currentBeat <- mkReg(0);
-    Reg#(Bit#(1024)) nextBeat <- mkReg(0);
+    // capture 写 port 0、emit 读 port 1：emit 可以在同一拍看到新捕获的 beat，
+    // 避免 BRAM 预取与帧发射之间的写后读气泡。emit 仅在需要跨 beat 时读取，
+    // 此时 next beat 已在上一拍之前稳定，不会重复消费同一 beat。
+    Array#(Reg#(Bit#(1024))) nextBeat <- mkCReg(2, 0);
     Reg#(Bit#(5)) currentBeatIndex <- mkReg(0);
     Reg#(Bit#(7)) intraBeatOffset <- mkReg(0);
-    Reg#(Bool) nextBeatValid <- mkReg(False);
+    Array#(Reg#(Bool)) nextBeatValid <- mkCReg(2, False);
     Reg#(Bool) readPending <- mkReg(False);
     Wire#(Bool) completedPulse <- mkDWire(False);
     // Egress events are produced when an EOF word is handed to `frameQ` but
@@ -103,7 +108,7 @@ module mkChannelEncapsulator#(Bit#(2) channel)(ChannelEncapsulatorIfc);
         payloadRemaining <= packet.descriptor.payloadLength;
         currentBeatIndex <= 0;
         intraBeatOffset <= 0;
-        nextBeatValid <= False;
+        nextBeatValid[1] <= False;
         payloadMem.b.put(False, { packet.slot, 5'd0 }, 0);
         readPending <= True;
         state <= E_PREFETCH;
@@ -117,7 +122,7 @@ module mkChannelEncapsulator#(Bit#(2) channel)(ChannelEncapsulatorIfc);
 
     rule requestNextBeat (state != E_IDLE && state != E_PREFETCH &&
                           state != E_TRAILER && payloadRemaining != 0 &&
-                          !readPending && !nextBeatValid &&
+                          !readPending && !nextBeatValid[1] &&
                           zeroExtend(currentBeatIndex) + 1 < current.beatCount);
         Bit#(5) requestedIndex = currentBeatIndex + 1;
         payloadMem.b.put(False, { current.slot, requestedIndex }, 0);
@@ -126,8 +131,8 @@ module mkChannelEncapsulator#(Bit#(2) channel)(ChannelEncapsulatorIfc);
 
     rule captureNextBeat (state != E_IDLE && state != E_PREFETCH &&
                           state != E_TRAILER && readPending);
-        nextBeat <= payloadMem.b.read;
-        nextBeatValid <= True;
+        nextBeat[0] <= payloadMem.b.read;
+        nextBeatValid[0] <= True;
         readPending <= False;
     endrule
 
@@ -158,11 +163,11 @@ module mkChannelEncapsulator#(Bit#(2) channel)(ChannelEncapsulatorIfc);
          (offsetAfterTake == 8'd128 && !payloadEnd));
 
     rule emitFrameWord (state != E_IDLE && state != E_PREFETCH &&
-                        frameQ.notFull && (!needsNextBeat || nextBeatValid) &&
+                        frameQ.notFull && (!needsNextBeat || nextBeatValid[1]) &&
                         (!frameEnd || egressQ.notFull));
         HeaderWord header = state == E_HEADER
             ? headerWords[headerIndex] : unpack(0);
-        Bit#(256) nextLane = nextBeatValid ? nextBeat[255:0] : 0;
+        Bit#(256) nextLane = nextBeatValid[1] ? nextBeat[1][255:0] : 0;
         Bit#(512) laneWindow = case (intraBeatOffset[6:5])
             2'd0: currentBeat[511:0];
             2'd1: currentBeat[767:256];
@@ -210,17 +215,17 @@ module mkChannelEncapsulator#(Bit#(2) channel)(ChannelEncapsulatorIfc);
                 entropy: current.path.entropy
             });
             completedPulse <= True;
-            nextBeatValid <= False;
+            nextBeatValid[1] <= False;
             padRemaining <= 0;
             state <= E_IDLE;
         end else begin
             if (payloadTake != 0) begin
                 payloadRemaining <= payloadRemaining - zeroExtend(payloadTake);
                 if (offsetAfterTake >= 8'd128) begin
-                    currentBeat <= nextBeat;
+                    currentBeat <= nextBeat[1];
                     currentBeatIndex <= currentBeatIndex + 1;
                     intraBeatOffset <= truncate(offsetAfterTake - 8'd128);
-                    nextBeatValid <= False;
+                    nextBeatValid[1] <= False;
                 end else begin
                     intraBeatOffset <= truncate(offsetAfterTake);
                 end
@@ -349,15 +354,15 @@ endinterface
 
 module mkFourChannelTxScheduler(FourChannelTxSchedulerIfc);
     FIFOF#(PacketDescriptor) firstDescQ <- mkSizedFIFOF(2);
-    FIFOF#(PacketPayloadBeat) firstPayloadQ <- mkSizedFIFOF(2);
+    FIFOF#(PacketPayloadBeat) firstPayloadQ <- mkSizedBypassFIFOF(2);
     FIFOF#(PacketDescriptor) retryDescQ <- mkSizedFIFOF(2);
-    FIFOF#(PacketPayloadBeat) retryPayloadQ <- mkSizedFIFOF(2);
+    FIFOF#(PacketPayloadBeat) retryPayloadQ <- mkSizedBypassFIFOF(2);
     FIFOF#(PacketDescriptor) orderedDescQ <- mkSizedFIFOF(2);
-    FIFOF#(PacketPayloadBeat) orderedPayloadQ <- mkSizedFIFOF(2);
+    FIFOF#(PacketPayloadBeat) orderedPayloadQ <- mkSizedBypassFIFOF(2);
     FIFOF#(PacketDescriptor) controlDescQ <- mkSizedFIFOF(2);
-    FIFOF#(PacketPayloadBeat) controlPayloadQ <- mkSizedFIFOF(2);
+    FIFOF#(PacketPayloadBeat) controlPayloadQ <- mkSizedBypassFIFOF(2);
 
-    FIFOF#(PacketPayloadBeat) selectedPayloadQ <- mkFIFOF;
+    FIFOF#(PacketPayloadBeat) selectedPayloadQ <- mkSizedBypassFIFOF(8);
     FIFOF#(TxCommit) commitQ <- mkSizedFIFOF(8);
     FIFOF#(TxEgressEvent) egressQ <- mkSizedFIFOF(8);
     FIFOF#(MrcNoPathEvent) noPathQ <- mkSizedFIFOF(4);

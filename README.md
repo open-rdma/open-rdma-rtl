@@ -17,7 +17,7 @@ OpenRDMA-flow/
 ├── m9_retx_state_manager/     Retx Scoreboard、Record、snapshot、admission
 ├── m10_retx_report_engine/    Retx Report 与 notification
 ├── m11_retx_retry_engine/     Retry admission、fetch 与抽象 M3 seam
-├── integrations/{tx,rx,retx}/
+├── integrations/{tx,rx,retx,e2e}/
 ├── retx_runtime/              Python reference policy
 ├── tools/archify/             纳入版本控制的架构提取工具
 └── reference/rx-mvp-legacy/   只读历史归档，不参与 active build
@@ -32,13 +32,14 @@ cocotb 必须显式指定安装了 Cocotb 2 的解释器；默认 `SIM=verilator
 | 套件 | 命令 | 内容 |
 |---|---|---|
 | 全树静态门禁 | `make preflight` | package 唯一性、Python import origin、Retx manifest、归档 checksum |
-| 全部 short | `make test-all PYTHON=/path/to/python` | M0–M11、三套 integration、contract/runtime |
+| 全部 short | `make test-all PYTHON=/path/to/python` | M0–M11、四套 integration、contract/runtime |
 | 全部 long | `make test-long PYTHON=/path/to/python` | 全部已有 long；Retx contract/runtime/M9–M11/Retx seam 当前为显式 short alias |
 | negative | `make test-negative PYTHON=/path/to/python` | M1 与 TX integration expected-fatal |
 | 单模块 | `make -C m2_packet_assembly test PYTHON=...` | 模块独立入口 |
 | TX integration | `make -C integrations/tx test` | DmaPhaseA + M0 chain |
 | RX integration | `make -C integrations/rx test` | RxTop + TX→RX loopback |
-| Retx seam | `make -C integrations/retx test` | 当前 M9/M10/M11 seam；不是完整 M3/M6/runtime 闭环 |
+| Retx seam | `make -C integrations/retx test` | M9/M10/M11 seam；保留为模块级 seam 测试 |
+| 完整数据链路 | `make -C integrations/e2e test` | M2/M3 + M4–M8 + M9–M11 + replay store + CPU runtime 的重传闭环 |
 | Retx contract | `make -C shared/contracts/retx test` | BSV/Python ABI golden |
 | RX production | `make production-rx-verilog` | `mkRxTop` production Verilog |
 
@@ -88,8 +89,39 @@ integration 的 request-ID 生命周期仍以 `TxCommit` 回收；`TxEgressEvent
 
 `preflight` 不再比较副本，而是拒绝 active tree 中重新出现同名共享 package、Python mirror、旧目录或漂移生成物。`reference/rx-mvp-legacy/` 明确排除。
 
+## 完整 TX-RX-Retx 数据链路
+
+`integrations/e2e` 把三段数据路径接到一起：
+
+```text
+context/payload -> M2 -> TX tap -> M3 -> wire -> RxTop (M4-M8)
+                           ^                      |
+                           |                RX feedback tap
+                     M11 -> bridge                 |
+                           ^                    M9/M10
+                           |                      |
+                     replay store <---- packet tap
+```
+
+- 正常报文只走 `M2 -> M3 -> RxTop -> DMA/CQE`；`TxCommit`/`TxEgressEvent` 与单独
+  TX integration 的含义一致。
+- TX tap 在 M2 输出处向 M9 注册 WQE、逐 packet `packetReserve`、发 `sentEvent`，并把
+  payload beat 写入 replay store。重传时 M11 从 replay store 取回同一 packet 的
+  descriptor/payload，经 `TRAFFIC_RETRY` 入口交给 M3。
+- RX feedback 同时驱动 M9 scoreboard 和 host 观测端口；CPU 通过
+  `snapshot -> report/notification -> RetryEntry -> result` host ABI 参与决策。
+- M3 的 retry 仲裁在 packet 边界插入重传，main first-traffic 的 packet 序列保持完整；
+  E2E 测试会断言 retry commit 严格落在主 message 的首尾 commit 之间。
+
+当前 E2E MVP 的边界：wire model 在测试侧注入 frame loss（ICRC/CRC 未实现，无法检测
+payload 位翻转）；M9 的 64 个 journal slot 在 ACK 后只产生 release 事件、尚未回收复用；
+CPU runtime 最多管理 4 个 active QP context；E2E 从 M2 接入 TX，M0/M1 前端的完整链路仍由
+`integrations/tx` 的 M0 chain 单独覆盖。
+
 ## 交付边界
 
 模块保持源码职责隔离和仓库内独立 `make -C`，但依赖同仓库 `shared/`。如需可搬运单模块包，应后续提供显式 export/bundle target，而不是恢复长期复制。
 
-Retx 当前实现仍是 ABI + M9/M10/M11 功能子集 + RetxTop seam。它尚未真实连接 M3/M6，也未在 cocotb 联合路径调用 `retx_runtime.Runtime`。
+Retx 的 ABI、M9/M10/M11 功能子集和 `integrations/retx` seam 仍然保留；`integrations/e2e`
+是当前唯一把 M2/M3、M4–M8、M9–M11、replay store 与 `retx_runtime` CPU 策略连成可执行
+数据链路的入口。不要在 product 结论中把 E2E wire model 的丢包注入误称为 ICRC/CRC 检测。

@@ -9,13 +9,15 @@ from openrdma_flow_tb.retx.layouts import pack_named, unpack_named
 
 W = {
     "qp": [("qpn", 24), ("qpEpoch", 16), ("initialPsn", 24), ("enable", 1)],
-    "wqe": [("qpn", 24), ("qpEpoch", 16), ("requestId", 16), ("psnBase", 24),
-            ("psnCount", 18), ("packetCount", 18), ("pmtu", 3),
+    "wqe": [("qpn", 24), ("destQpn", 24), ("qpEpoch", 16), ("requestId", 16),
+            ("psnBase", 24), ("psnCount", 18), ("packetCount", 18), ("pmtu", 3),
             ("messageLength", 25), ("remoteAddr", 64), ("remoteKey", 32),
             ("opcode", 8), ("slotId", 18), ("wireProfile", 2), ("evProfile", 2),
             ("mrcMsn", 16), ("msnValid", 1)],
     "reserve": [("qpn", 24), ("qpEpoch", 16), ("psn", 24), ("requestId", 16),
-                ("packetIndex", 18), ("packetCount", 18), ("recordHandle", 32),
+                ("packetIndex", 18), ("packetCount", 18), ("messageOffset", 25),
+                ("payloadLength", 13), ("messageLength", 25), ("opcode", 8),
+                ("first", 1), ("last", 1), ("recordHandle", 32),
                 ("replayHandle", 32)],
     "sent": [("qpn", 24), ("qpEpoch", 16), ("psn", 24), ("packetIndex", 18),
              ("recordHandle", 32), ("replayHandle", 32), ("commitToken", 32)],
@@ -42,9 +44,11 @@ W = {
     "grant": [("ok", 1), ("reason", 8), ("replayHandle", 32)],
     "admgrant": [("ok", 1), ("status", 4), ("reason", 8), ("recordHandle", 32),
                  ("replayHandle", 32), ("requestId", 16), ("packetIndex", 18),
-                 ("packetCount", 18), ("psn", 24), ("opcode", 8), ("pmtu", 3),
+                 ("packetCount", 18), ("psn", 24), ("destQpn", 24),
+                 ("opcode", 8), ("pmtu", 3),
                  ("remoteAddr", 64), ("remoteKey", 32), ("messageOffset", 25),
-                 ("payloadLength", 13), ("first", 1), ("last", 1),
+                 ("payloadLength", 13), ("messageLength", 25),
+                 ("first", 1), ("last", 1),
                  ("wireProfile", 2), ("evProfile", 2), ("mrcMsn", 16)],
     "terminate": [("qpn", 24), ("qpEpoch", 16), ("psn", 24), ("recordHandle", 32)],
 }
@@ -75,7 +79,7 @@ async def test_lifecycle_and_snapshot(dut):
     cfg = pack("qp", qpn=0x11, qpEpoch=1, initialPsn=100, enable=1)
     await call_cfg(dut, "configureQpAt", 0, cfg)
     await send(dut, "wqeRegisterIn", pack(
-        "wqe", qpn=0x11, qpEpoch=1, requestId=42, psnBase=100, psnCount=4,
+        "wqe", qpn=0x11, destQpn=0x22, qpEpoch=1, requestId=42, psnBase=100, psnCount=4,
         packetCount=4, pmtu=2, messageLength=1024, remoteAddr=0x1122334455667788,
         remoteKey=0xCAFEBABE, opcode=0x0A, slotId=3, msnValid=0))
     resp = unpack("wqe", 0)  # placeholder
@@ -85,7 +89,8 @@ async def test_lifecycle_and_snapshot(dut):
     assert (raw >> 32) & 1 == 1
     await send(dut, "packetReserveIn", pack(
         "reserve", qpn=0x11, qpEpoch=1, psn=100, requestId=42,
-        packetIndex=0, packetCount=4, recordHandle=handle))
+        packetIndex=0, packetCount=4, messageOffset=0, payloadLength=256,
+        messageLength=1024, opcode=0x0A, first=1, last=0, recordHandle=handle))
     graw = await recv(dut, "packetGrantOut")
     grant = unpack("grant", graw)
     dut._log.info(f"grant raw={graw:#x} {grant} ack={int(dut.debugAckQp.value):#x}")
@@ -99,6 +104,10 @@ async def test_lifecycle_and_snapshot(dut):
     assert hdr["qpn"] == 0x11 and hdr["holeCount"] == 1, hdr
     hole = unpack("hole", await recv(dut, "snapshotEntryOut"))
     assert hole["psn"] == 100 and hole["remote_addr"] == 0x1122334455667788
+    assert hole["message_offset"] == 0 and hole["payload_length"] == 256
+    assert hole["packet_index"] == 0 and hole["packet_count"] == 4
+    assert hole["is_first"] == 1 and hole["is_last"] == 0
+    assert hole["opcode"] == 0x0A and hole["pmtu"] == 2
     await send(dut, "feedbackIn", pack(
         "feedback", qpn=0x11, qpEpoch=1, kind=1, ackPsn=100, sackBase=101,
         sackBitmap=0, sackValidBits=0, nakValid=0))
@@ -117,13 +126,14 @@ async def test_admission_rejects_stale(dut):
     cfg = pack("qp", qpn=0x22, qpEpoch=2, initialPsn=200, enable=1)
     await call_cfg(dut, "configureQpAt", 1, cfg)
     await send(dut, "wqeRegisterIn", pack(
-        "wqe", qpn=0x22, qpEpoch=2, requestId=7, psnBase=200, psnCount=1,
-        packetCount=1, pmtu=1, opcode=0x0A))
+        "wqe", qpn=0x22, destQpn=0x33, qpEpoch=2, requestId=7, psnBase=200, psnCount=1,
+        packetCount=1, pmtu=1, messageLength=256, opcode=0x09))
     raw = await recv(dut, "wqeRegisterRespOut")
     handle = raw & 0xFFFFFFFF
     await send(dut, "packetReserveIn", pack(
         "reserve", qpn=0x22, qpEpoch=2, psn=200, requestId=7,
-        packetIndex=0, packetCount=1, recordHandle=handle))
+        packetIndex=0, packetCount=1, messageOffset=0, payloadLength=256,
+        messageLength=256, opcode=0x09, first=1, last=1, recordHandle=handle))
     assert unpack("grant", await recv(dut, "packetGrantOut"))["ok"] == 1
     # PSN is reserved but not SENT yet -> stale.
     await send(dut, "admissionReqIn", pack(
@@ -132,7 +142,6 @@ async def test_admission_rejects_stale(dut):
         expectedRequestId=7, expectedPacketIndex=0))
     g = unpack("admgrant", await recv(dut, "admissionGrantOut"))
     assert g["ok"] == 0 and g["status"] == 3, g
-
 
 @cocotb.test()
 async def test_sack_marks_entry(dut):
@@ -148,7 +157,9 @@ async def test_sack_marks_entry(dut):
     for psn, idx in ((300, 0), (301, 1)):
         await send(dut, "packetReserveIn", pack(
             "reserve", qpn=0x33, qpEpoch=3, psn=psn, requestId=9,
-            packetIndex=idx, packetCount=2, recordHandle=handle))
+            packetIndex=idx, packetCount=2, messageOffset=idx * 256,
+            payloadLength=256, messageLength=512, opcode=0x07,
+            first=idx == 0, last=idx == 1, recordHandle=handle))
         g = unpack("grant", await recv(dut, "packetGrantOut"))
         await send(dut, "sentEventIn", pack(
             "sent", qpn=0x33, qpEpoch=3, psn=psn, packetIndex=idx,

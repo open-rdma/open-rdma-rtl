@@ -10,8 +10,9 @@ RDMA 数据通路的模块化 BSV/cocotb 树：TX 为 M0–M3，RX 为 M4–M8�
 - M0–M11 的目录物理映射只维护在 `shared/make/modules.mk`；目录统一为 `m编号_职责名`，其中 M0 是 `m0_doorbell_analysis`。
 - 公共 BSV：`shared/bsv/{common,tx,rx}`；Retx 生成 BSV：`shared/generated/retx/bsv`。
 - 公共 cocotb：`shared/python/openrdma_flow_tb`；production Retx codec：`shared/generated/retx/python/openrdma_flow`。
-- 跨模块连接：`integrations/tx`、`integrations/rx`、`integrations/retx`。
+- 跨模块连接：`integrations/tx`、`integrations/rx`、`integrations/retx`（M9/M10/M11 seam）、`integrations/e2e`（TX-RX-Retx 完整数据链路）。
 - Retx schema/generator/test：`shared/contracts/retx`；host reference policy：`retx_runtime`。
+- `integrations/e2e` 的 TX tap / replay store / RX feedback bridge / M11→M3 bridge 是该 integration 的局部模块，不属于 M0–M11。
 - `reference/rx-mvp-legacy/` 是只读归档，不得进入 BSC path、Python import 或 active 门禁。
 
 ## Running and verifying
@@ -20,6 +21,7 @@ RDMA 数据通路的模块化 BSV/cocotb 树：TX 为 M0–M3，RX 为 M4–M8�
 - 改动前先跑 `make preflight`；它检查共享 package 唯一性、Python import origin、Retx manifest 和归档 checksum。
 - 全量 short：`make test-all PYTHON=…`；long：`make test-long PYTHON=…`；negative：`make test-negative PYTHON=…`。
 - 单模块示例：`make -C m2_packet_assembly test PYTHON=…`；集成示例：`make -C integrations/tx test PYTHON=…`。
+- 完整 TX-RX-Retx 链路：`make test-e2e PYTHON=…`（等价于 `make -C integrations/e2e test`）。
 - `make generate-retx` 是唯一允许更新 Retx 生成物的入口；普通 build 只校验，`make clean` 不删除生成物。
 
 ## Conventions that differ from defaults
@@ -33,8 +35,9 @@ RDMA 数据通路的模块化 BSV/cocotb 树：TX 为 M0–M3，RX 为 M4–M8�
 ## Known pitfalls
 
 - `TxCommit` 是 packet 进入 M3 per-channel buffer，不是上线或 ACK；`TxEgressEvent` 也不是 MAC 上线时刻或 RTT 起点。
-- `integrations/retx` 当前只连接 M9/M10/M11 seam，尚未真实连接 M3、M6 或 Python runtime，不得称为完整重传闭环。
-- Retx contract/runtime、M9–M11 与 Retx seam 的 long target 当前是显式 short alias，不代表新增 randomized long coverage。
+- `integrations/retx` 只连接 M9/M10/M11 seam；完整闭环在 `integrations/e2e`，不要把 seam 测试当成完整重传数据链路。
+- E2E 的丢包来自测试侧 wire model（frame 不注入 RX）。ICRC/CRC 未实现，因此不能检测 payload 位翻转。
+- M9 的 journal/record 在 ACK 后尚未回收复用；单次 E2E 场景受 64 个 journal slot 限制。M9/M10/M11、Retx seam 与 `integrations/e2e` 的 long target 目前都是显式 short alias。
 - 未实现、不得声称合规：ICRC、IPv6/SRv6、WriteImm、TSETH、on-wire SACK/NACK/Probe，以及 RX 侧实验 wire 解析。
 
 <!-- /bmad:context -->

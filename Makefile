@@ -9,12 +9,12 @@ TX_MODULES := $(M0_DIR) $(M1_DIR) $(M2_DIR) $(M3_DIR)
 RX_MODULES := $(M4_DIR) $(M5_DIR) $(M6_DIR) $(M7_DIR) $(M8_DIR)
 RETX_MODULES := $(M9_DIR) $(M10_DIR) $(M11_DIR)
 ALL_MODULES := $(TX_MODULES) $(RX_MODULES) $(RETX_MODULES)
-ALL_INTEGRATIONS := $(TX_INTEGRATION_DIR) $(RX_INTEGRATION_DIR) $(RETX_INTEGRATION_DIR)
+ALL_INTEGRATIONS := $(TX_INTEGRATION_DIR) $(RX_INTEGRATION_DIR) $(RETX_INTEGRATION_DIR) $(E2E_INTEGRATION_DIR)
 
 .PHONY: preflight generate-retx test test-all test-long test-negative \
 	compile-rx verilog-rx test-rx test-rx-long production-rx-verilog \
 	test-retx-contract test-retx-units test-retx-integration test-retx \
-	test-retx-all clean-rx clean-retx clean
+	test-retx-all test-e2e clean-rx clean-retx clean
 
 preflight:
 	FLOW_ROOT=$(FLOW_ROOT) RETX_GENERATED_DIR=$(RETX_GENERATED_DIR) \
@@ -34,6 +34,7 @@ test-all: preflight
 	$(MAKE) -C $(TX_INTEGRATION_DIR) test-integration SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 	$(MAKE) -C $(TX_INTEGRATION_DIR) test-m0chain SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 	$(MAKE) test-retx SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) test-e2e SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 
 test: test-all
 
@@ -52,6 +53,7 @@ test-long: preflight
 	done
 	$(MAKE) -C $(RETX_RUNTIME_DIR) test-long PYTHON=$(PYTHON)
 	$(MAKE) -C $(RETX_INTEGRATION_DIR) test-long SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) test-e2e SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 
 test-negative: preflight
 	$(MAKE) -C $(M1_DIR) test-negative TARGET=dma SIM=icarus PYTHON=$(PYTHON) BSC=$(BSC)
@@ -99,6 +101,9 @@ test-retx-integration:
 	$(MAKE) -C $(RETX_INTEGRATION_DIR) test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 
 test-retx: preflight test-retx-contract test-retx-units test-retx-integration
+
+test-e2e:
+	$(MAKE) -C $(E2E_INTEGRATION_DIR) test SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 
 test-retx-all: test-all
 

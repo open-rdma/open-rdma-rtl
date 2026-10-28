@@ -18,18 +18,20 @@ ADMREQ = [("retryRequestId", 32), ("hostSessionId", 32), ("nicSessionId", 32),
           ("reportGeneration", 32), ("triggerReason", 4), ("retryAttempt", 8)]
 GRANT = [("ok", 1), ("status", 4), ("reason", 8), ("recordHandle", 32),
          ("replayHandle", 32), ("requestId", 16), ("packetIndex", 18),
-         ("packetCount", 18), ("psn", 24), ("opcode", 8), ("pmtu", 3),
-         ("remoteAddr", 64), ("remoteKey", 32), ("messageOffset", 25),
-         ("payloadLength", 13), ("first", 1), ("last", 1),
+         ("packetCount", 18), ("psn", 24), ("destQpn", 24), ("opcode", 8),
+         ("pmtu", 3), ("remoteAddr", 64), ("remoteKey", 32),
+         ("messageOffset", 25), ("payloadLength", 13), ("messageLength", 25),
+         ("first", 1), ("last", 1),
          ("wireProfile", 2), ("evProfile", 2), ("mrcMsn", 16)]
 FETCH = [("fetchId", 16), ("replayHandle", 32), ("offset", 25),
          ("length", 13), ("token", 32)]
 BEAT = [("fetchId", 16), ("data", 1024), ("keep", 128), ("sop", 1),
         ("eop", 1), ("valid", 1), ("last", 1)]
-M3DESC = [("qpn", 24), ("qpEpoch", 16), ("requestId", 16), ("psn", 24),
-          ("packetIndex", 18), ("packetCount", 18), ("pmtu", 3), ("opcode", 8),
-          ("remoteAddr", 64), ("remoteKey", 32), ("messageOffset", 25),
-          ("payloadLength", 13), ("first", 1), ("last", 1), ("wireProfile", 2),
+M3DESC = [("qpn", 24), ("destQpn", 24), ("qpEpoch", 16), ("requestId", 16),
+          ("psn", 24), ("packetIndex", 18), ("packetCount", 18), ("pmtu", 3),
+          ("opcode", 8), ("remoteAddr", 64), ("remoteKey", 32),
+          ("messageOffset", 25), ("payloadLength", 13), ("messageLength", 25),
+          ("first", 1), ("last", 1), ("wireProfile", 2),
           ("evProfile", 2), ("mrcMsn", 16)]
 M3BEAT = [("requestId", 16), ("psn", 24), ("data", 1024), ("keep", 128),
           ("sop", 1), ("eop", 1)]
@@ -73,9 +75,10 @@ async def test_admit_fetch_sent(dut):
     adm = unpack(ADMREQ, await recv(dut, "admissionReqOut"))
     assert adm["qpn"] == 0x11 and adm["psn"] == 101 and adm["nicSessionId"] == 0x0BAD
     g = pack(GRANT, dict(ok=1, status=1, replayHandle=0x99, recordHandle=7, requestId=42,
-                         packetIndex=1, packetCount=2, psn=101, opcode=0x0A,
-                         pmtu=1, remoteAddr=0x1122, remoteKey=0xCAFE,
-                         messageOffset=64, payloadLength=32, first=0, last=0))
+                         packetIndex=1, packetCount=2, psn=101, destQpn=0x11,
+                         opcode=0x0A, pmtu=1, remoteAddr=0x1122, remoteKey=0xCAFE,
+                         messageOffset=64, payloadLength=32, messageLength=512,
+                         first=0, last=1))
     await send(dut, "admissionGrantIn", g)
     r0 = unpack(RESULT, await recv(dut, "resultOut"))
     assert r0["status"] == 1 and r0["resultSequence"] == 0, r0
@@ -86,6 +89,9 @@ async def test_admit_fetch_sent(dut):
     await send(dut, "fetchBeatIn", beat)
     desc = unpack(M3DESC, await recv(dut, "m3DescOut"))
     assert desc["qpn"] == 0x11 and desc["psn"] == 101 and desc["remoteAddr"] == 0x1122
+    assert desc["destQpn"] == 0x11 and desc["messageLength"] == 512
+    assert desc["messageOffset"] == 64 and desc["payloadLength"] == 32
+    assert desc["first"] == 0 and desc["last"] == 1
     mb = unpack(M3BEAT, await recv(dut, "m3BeatOut"))
     assert mb["sop"] == 1 and mb["eop"] == 1 and mb["data"] == 0xAA
     r1 = unpack(RESULT, await recv(dut, "resultOut"))

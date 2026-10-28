@@ -14,6 +14,7 @@ typedef struct {
     Bool valid;
     Bit#(32) handle;
     Bit#(24) qpn;
+    Bit#(24) destQpn;
     Bit#(16) epoch;
     Bit#(16) requestId;
     Bit#(24) psnBase;
@@ -37,6 +38,7 @@ typedef struct {
     Bool valid;
     Bit#(3) state; // 0 free,1 reserved,2 sent,3 sacked,4 cum-acked
     Bit#(24) qpn;
+    Bit#(24) destQpn;
     Bit#(16) epoch;
     Bit#(24) psn;
     Bit#(32) handle;
@@ -246,6 +248,7 @@ endfunction
 
 function Jnl fillFromRec(Jnl j, Rec r);
     Jnl n = j;
+    n.destQpn = r.destQpn;
     n.addr = r.addr; n.key = r.key; n.opcode = r.opcode; n.pmtu = r.pmtu;
     n.slot = r.slotId; n.wp = r.wp; n.ep = r.ep; n.msn = r.mrcMsn;
     n.msnValid = r.msnValid; n.msgLen = r.messageLen;
@@ -317,7 +320,8 @@ module mkRetxStateManager(RetxStateManagerIfc);
         if (isValid(m)) begin
             Bit#(6) idx = fromMaybe(0, m);
             Bit#(32) handle = {recGen[idx], idx};
-            Rec r = Rec { valid: True, handle: handle, qpn: req.qpn, epoch: req.qpEpoch,
+            Rec r = Rec { valid: True, handle: handle, qpn: req.qpn,
+                destQpn: req.destQpn, epoch: req.qpEpoch,
                 requestId: req.requestId, psnBase: req.psnBase,
                 psnCount: req.psnCount, packetCount: req.packetCount,
                 remaining: req.packetCount, pmtu: req.pmtu,
@@ -346,12 +350,17 @@ module mkRetxStateManager(RetxStateManagerIfc);
             Bit#(6) idx = fromMaybe(0, jm);
             Bit#(32) replay = {replayGen[idx] + 1, idx};
             Jnl j = Jnl { valid: True, state: 1, qpn: req.qpn,
-                epoch: req.qpEpoch, psn: req.psn, handle: req.recordHandle,
+                destQpn: 0, epoch: req.qpEpoch, psn: req.psn, handle: req.recordHandle,
                 pidx: req.packetIndex, replay: replay, msgOff: 0, plen: 0,
                 msgLen: 0, addr: 0, key: 0, opcode: 0, pmtu: 0, slot: 0,
                 wp: 0, ep: 0, msn: 0, msnValid: 0, first: 0, last: 0,
                 reqId: req.requestId, pcount: req.packetCount };
             j = fillFromRec(j, recs[fromMaybe(0, rm)]);
+            j.msgOff = req.messageOffset;
+            j.plen = req.payloadLength;
+            j.opcode = req.opcode;
+            j.first = req.first;
+            j.last = req.last;
             jnls <= update(jnls, idx, j);
             replayGen <= update(replayGen, idx, replayGen[idx] + 1);
             grantQ.enq(RetxPacketGrantHw { ok: 1, reason: 0, replayHandle: replay });
@@ -451,6 +460,7 @@ module mkRetxStateManager(RetxStateManagerIfc);
             g.packetCount = j.pcount; g.psn = j.psn; g.opcode = j.opcode;
             g.pmtu = j.pmtu; g.remoteAddr = j.addr; g.remoteKey = j.key;
             g.messageOffset = j.msgOff; g.payloadLength = j.plen;
+            g.messageLength = j.msgLen; g.destQpn = j.destQpn;
             g.first = j.first; g.last = j.last; g.wireProfile = j.wp;
             g.evProfile = j.ep; g.mrcMsn = j.msn;
         end

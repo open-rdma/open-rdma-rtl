@@ -8,6 +8,16 @@ __pycache__/
 *.so
 *.vcd
 
+# LaTeX 中间产物（PDF 预览可按需入库）
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+
 # Archify 架构图产物（仅本地保留，不入库）
 .archify/
 

@@ -605,6 +605,7 @@ typedef struct {
 
 typedef struct {
     Bit#(24) qpn;
+    Bit#(24) destQpn;
     Bit#(16) qpEpoch;
     Bit#(16) requestId;
     Bit#(24) psnBase;
@@ -634,6 +635,12 @@ typedef struct {
     Bit#(16) requestId;
     Bit#(18) packetIndex;
     Bit#(18) packetCount;
+    Bit#(25) messageOffset;
+    Bit#(13) payloadLength;
+    Bit#(25) messageLength;
+    Bit#(8) opcode;
+    Bit#(1) first;
+    Bit#(1) last;
     Bit#(32) recordHandle;
     Bit#(32) replayHandle;
 } RetxPacketReserveHw deriving(Bits, Eq, FShow);
@@ -726,12 +733,14 @@ typedef struct {
     Bit#(18) packetIndex;
     Bit#(18) packetCount;
     Bit#(24) psn;
+    Bit#(24) destQpn;
     Bit#(8) opcode;
     Bit#(3) pmtu;
     Bit#(64) remoteAddr;
     Bit#(32) remoteKey;
     Bit#(25) messageOffset;
     Bit#(13) payloadLength;
+    Bit#(25) messageLength;
     Bit#(1) first;
     Bit#(1) last;
     Bit#(2) wireProfile;
@@ -861,6 +870,7 @@ typedef struct {
 
 typedef struct {
     Bit#(24) qpn;
+    Bit#(24) destQpn;
     Bit#(16) qpEpoch;
     Bit#(16) requestId;
     Bit#(24) psn;
@@ -872,6 +882,7 @@ typedef struct {
     Bit#(32) remoteKey;
     Bit#(25) messageOffset;
     Bit#(13) payloadLength;
+    Bit#(25) messageLength;
     Bit#(1) first;
     Bit#(1) last;
     Bit#(2) wireProfile;

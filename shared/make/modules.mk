@@ -31,6 +31,7 @@ M11_DIR := $(FLOW_ROOT)/$(M11_DIR_NAME)
 TX_INTEGRATION_DIR := $(FLOW_ROOT)/integrations/tx
 RX_INTEGRATION_DIR := $(FLOW_ROOT)/integrations/rx
 RETX_INTEGRATION_DIR := $(FLOW_ROOT)/integrations/retx
+E2E_INTEGRATION_DIR := $(FLOW_ROOT)/integrations/e2e
 RETX_RUNTIME_DIR := $(FLOW_ROOT)/retx_runtime
 
 SHARED_DIR := $(FLOW_ROOT)/shared

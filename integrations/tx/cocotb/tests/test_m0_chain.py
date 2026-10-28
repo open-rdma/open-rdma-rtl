@@ -18,6 +18,8 @@ import random
 import cocotb
 
 from m0_chain_bfm import (
+    MODEL_CLOCK_PS,
+    M0ChainScenarioMetrics,
     M0ChainTB,
     M0Submission,
     configure_mr,
@@ -281,3 +283,183 @@ async def randomized_fixed_seed_m0_to_m3(dut):
             M0Submission(qpn, qpn, length, debug_seq=(3 * index) & 0xF)
         )
     await run_m0_chain_scenario(tb, model, messages, CFG)
+
+
+def _steady_timestamp_gbps(
+    timestamps_ps: list[int],
+    payload_bytes: int = 1024,
+    warmup_events: int = 16,
+    drain_events: int = 16,
+) -> float:
+    ordered = sorted(timestamps_ps)
+    end = len(ordered) - drain_events - 1
+    assert end > warmup_events
+    duration_ps = ordered[end] - ordered[warmup_events]
+    assert duration_ps > 0
+    return (end - warmup_events) * payload_bytes * 8 * 1000 / duration_ps
+
+
+def _cycle_gap_summary(timestamps_ps: list[int]) -> dict[int, int]:
+    ordered = sorted(timestamps_ps)
+    result: dict[int, int] = {}
+    for first, second in zip(ordered, ordered[1:]):
+        gap = (second - first) // MODEL_CLOCK_PS
+        result[gap] = result.get(gap, 0) + 1
+    return result
+
+
+def _full_window_gbps(metrics: M0ChainScenarioMetrics) -> float:
+    """与归档 E04 边界一致：首个 submission 接受到最后 frame EOF。"""
+    payload = sum(metrics.frame_payload_bytes)
+    duration_ps = max(metrics.frame_eof_ps) - min(metrics.submission_accept_ps)
+    assert duration_ps > 0
+    return payload * 8 * 1000 / duration_ps
+
+
+def _steady_frame_gbps(
+    metrics: M0ChainScenarioMetrics,
+    warmup_frames: int = 16,
+    drain_frames: int = 16,
+) -> float:
+    events = sorted(zip(
+        metrics.frame_eof_ps, metrics.frame_payload_bytes, strict=True
+    ))
+    end = len(events) - drain_frames - 1
+    assert end > warmup_frames
+    duration_ps = events[end][0] - events[warmup_frames][0]
+    transferred = sum(
+        payload_bytes
+        for _, payload_bytes in events[warmup_frames + 1 : end + 1]
+    )
+    assert duration_ps > 0
+    return transferred * 8 * 1000 / duration_ps
+
+
+@cocotb.test(timeout_time=20_000_000, timeout_unit="ns")
+async def sustained_m0_to_m3_rate_hides_bounded_dma_latency(dut):
+    """四通道 TX 应达到 400 Gb/s，并用 outstanding request 隐藏短 latency。"""
+    tb = M0ChainTB(dut)
+    await tb.reset()
+    model = M0RefModel()
+    await bring_up(
+        tb,
+        model,
+        qps={0: 4, 1: 4, 2: 4, 3: 4},
+        slots={
+            0: (0x0, 0x4000),
+            1: (0x1000, 0x4000),
+            2: (0x2000, 0x4000),
+            3: (0x3000, 0x4000),
+        },
+    )
+
+    for case_index, (latency_cycles, minimum_gbps) in enumerate(
+        ((0, 400.0), (20, 400.0), (100, 240.0))
+    ):
+        messages = [
+            M0Submission(
+                qpn=index & 3,
+                slot_id=index & 3,
+                length=1024,
+                debug_seq=(case_index + index) & 0xF,
+            )
+            for index in range(128)
+        ]
+        metrics = M0ChainScenarioMetrics()
+        await run_m0_chain_scenario(
+            tb,
+            model,
+            messages,
+            CFG,
+            completion_order="in_order",
+            request_latency_cycles=latency_cycles,
+            prime_outstanding=8,
+            metrics=metrics,
+            timeout_ns=10_000_000,
+        )
+        rate = _steady_frame_gbps(metrics)
+        submission_rate = _steady_timestamp_gbps(
+            metrics.submission_accept_ps
+        )
+        dma_request_rate = _steady_timestamp_gbps(
+            metrics.dma_request_issue_ps
+        )
+        commit_rate = _steady_timestamp_gbps(metrics.tx_commit_ps)
+        dut._log.info(
+            "M0→M3 稳态：latency=%d cycles，submission=%.3f，"
+            "DMA request=%.3f，TxCommit=%.3f，frame EOF=%.3f Gb/s，"
+            "full-window=%.3f Gb/s",
+            latency_cycles,
+            submission_rate,
+            dma_request_rate,
+            commit_rate,
+            rate,
+            _full_window_gbps(metrics),
+        )
+        dut._log.info(
+            "周期间隔直方图：DMA request=%s，TxCommit=%s，frame EOF=%s",
+            _cycle_gap_summary(metrics.dma_request_issue_ps),
+            _cycle_gap_summary(metrics.tx_commit_ps),
+            _cycle_gap_summary(metrics.frame_eof_ps),
+        )
+        assert rate >= minimum_gbps, (
+            f"latency={latency_cycles}：{rate:.3f} Gb/s < {minimum_gbps:.3f} Gb/s"
+        )
+
+    # 归档评测的串行 DMA 模型在同一 RTL 上的基线，用于区分“模型效应”和 RTL 修改。
+    # 使用与归档 32-message stress 行相同的批次规模。
+    for serial_latency in (0, 20, 100):
+        serial_metrics = M0ChainScenarioMetrics()
+        serial_messages = [
+            M0Submission(
+                qpn=index & 3, slot_id=index & 3, length=1024, debug_seq=index & 0xF
+            )
+            for index in range(32)
+        ]
+        await run_m0_chain_scenario(
+            tb,
+            model,
+            serial_messages,
+            CFG,
+            completion_order="in_order",
+            request_latency_cycles=serial_latency,
+            serial_dma=True,
+            metrics=serial_metrics,
+            timeout_ns=10_000_000,
+        )
+        dut._log.info(
+            "串行 DMA 基线：latency=%d cycles，frame EOF=%.3f Gb/s，"
+            "full-window=%.3f Gb/s",
+            serial_latency,
+            _steady_frame_gbps(
+                serial_metrics, warmup_frames=4, drain_frames=4
+            ),
+            _full_window_gbps(serial_metrics),
+        )
+
+    # 其它消息尺寸只记录数据正确的稳态速率，不设 400 Gb/s 门限。
+    for size in (64, 4096, 16384):
+        sweep_metrics = M0ChainScenarioMetrics()
+        sweep_messages = [
+            M0Submission(qpn=index & 3, slot_id=index & 3, length=size, debug_seq=index & 0xF)
+            for index in range(64)
+        ]
+        await run_m0_chain_scenario(
+            tb,
+            model,
+            sweep_messages,
+            CFG,
+            completion_order="in_order",
+            prime_outstanding=8,
+            metrics=sweep_metrics,
+            timeout_ns=10_000_000,
+        )
+        dut._log.info(
+            "消息尺寸 %d B：frame EOF=%.3f Gb/s",
+            size,
+            _steady_frame_gbps(
+                sweep_metrics,
+                warmup_frames=8,
+                drain_frames=8,
+            ),
+        )

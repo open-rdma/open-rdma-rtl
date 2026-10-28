@@ -245,8 +245,8 @@ CRC32_OBJECTS = {"crc32", "header_crc32", "entry_crc32"}
 INTERNAL_TYPES = {
     "QpConfigHw": [("qpn", 24), ("qpEpoch", 16), ("initialPsn", 24), ("enable", 1)],
     "WqeRegisterHw": [
-        ("qpn", 24), ("qpEpoch", 16), ("requestId", 16), ("psnBase", 24),
-        ("psnCount", 18), ("packetCount", 18), ("pmtu", 3),
+        ("qpn", 24), ("destQpn", 24), ("qpEpoch", 16), ("requestId", 16),
+        ("psnBase", 24), ("psnCount", 18), ("packetCount", 18), ("pmtu", 3),
         ("messageLength", 25), ("remoteAddr", 64), ("remoteKey", 32),
         ("opcode", 8), ("slotId", 18), ("wireProfile", 2), ("evProfile", 2),
         ("mrcMsn", 16), ("msnValid", 1),
@@ -254,8 +254,9 @@ INTERNAL_TYPES = {
     "WqeRegisterRespHw": [("ok", 1), ("recordHandle", 32)],
     "PacketReserveHw": [
         ("qpn", 24), ("qpEpoch", 16), ("psn", 24), ("requestId", 16),
-        ("packetIndex", 18), ("packetCount", 18), ("recordHandle", 32),
-        ("replayHandle", 32),
+        ("packetIndex", 18), ("packetCount", 18), ("messageOffset", 25),
+        ("payloadLength", 13), ("messageLength", 25), ("opcode", 8),
+        ("first", 1), ("last", 1), ("recordHandle", 32), ("replayHandle", 32),
     ],
     "PacketGrantHw": [("ok", 1), ("reason", 8), ("replayHandle", 32)],
     "SentEventHw": [
@@ -290,10 +291,11 @@ INTERNAL_TYPES = {
     "AdmissionGrantHw": [
         ("ok", 1), ("status", 4), ("reason", 8), ("recordHandle", 32),
         ("replayHandle", 32), ("requestId", 16), ("packetIndex", 18),
-        ("packetCount", 18), ("psn", 24), ("opcode", 8), ("pmtu", 3),
-        ("remoteAddr", 64), ("remoteKey", 32), ("messageOffset", 25),
-        ("payloadLength", 13), ("first", 1), ("last", 1),
-        ("wireProfile", 2), ("evProfile", 2), ("mrcMsn", 16),
+        ("packetCount", 18), ("psn", 24), ("destQpn", 24), ("opcode", 8),
+        ("pmtu", 3), ("remoteAddr", 64), ("remoteKey", 32),
+        ("messageOffset", 25), ("payloadLength", 13), ("messageLength", 25),
+        ("first", 1), ("last", 1), ("wireProfile", 2), ("evProfile", 2),
+        ("mrcMsn", 16),
     ],
     "FetchReqHw": [
         ("fetchId", 16), ("replayHandle", 32), ("offset", 25),
@@ -347,10 +349,11 @@ INTERNAL_TYPES = {
         ("eop", 1), ("last", 1), ("beatIndex", 8),
     ],
     "M3DescHw": [
-        ("qpn", 24), ("qpEpoch", 16), ("requestId", 16), ("psn", 24),
-        ("packetIndex", 18), ("packetCount", 18), ("pmtu", 3), ("opcode", 8),
-        ("remoteAddr", 64), ("remoteKey", 32), ("messageOffset", 25),
-        ("payloadLength", 13), ("first", 1), ("last", 1), ("wireProfile", 2),
+        ("qpn", 24), ("destQpn", 24), ("qpEpoch", 16), ("requestId", 16),
+        ("psn", 24), ("packetIndex", 18), ("packetCount", 18), ("pmtu", 3),
+        ("opcode", 8), ("remoteAddr", 64), ("remoteKey", 32),
+        ("messageOffset", 25), ("payloadLength", 13), ("messageLength", 25),
+        ("first", 1), ("last", 1), ("wireProfile", 2),
         ("evProfile", 2), ("mrcMsn", 16),
     ],
     "M3BeatHw": [

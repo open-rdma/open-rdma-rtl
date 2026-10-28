@@ -1,0 +1,614 @@
+% OpenRDMA Evaluation：英文论文正文，可由主论文直接 \input。
+% 已有数值的唯一来源是 reference/evaluation-preview.pdf；不要把 planned 表格当作结果。
+\providecommand{\EvalFigureRoot}{report/figures}
+\providecommand{\EvalPlanned}[1]{}
+
+\section{Evaluation}
+\label{sec:eval:overview}
+
+We evaluate the implemented datapath at the boundary that the current evidence
+supports: cycle-accurate RTL execution with abstract DMA interfaces, coupled to
+a packet-level network model.  Five questions guide the evaluation.  Where does
+the TX pipeline spend time?  When does packet spraying help?  How much path skew
+can the receiver absorb?  What does ordered completion cost?  Finally, what
+implementation cost has been established, and what remains to be measured on a
+target FPGA?  The results expose both benefits and limits.  In the tested
+single-QP workload, packet spraying raises network goodput by up to $2.48\times$;
+with four active QPs and 4-KiB messages, however, spraying delivers 26.4\%
+lower goodput than fixed placement.  The trace combines byte imbalance with a
+different packet-emission schedule, so the experiment does not isolate their
+individual contributions.  Receive-window pressure and global retirement are
+separate constraints that additional path bandwidth alone does not remove.
+
+\subsection{Methodology and Evidence Boundary}
+\label{sec:eval:method}
+
+\textbf{Archived co-simulation.}
+The measured batch connects a Verilator simulation of the TX RTL, an ns-3
+network, and a Verilator simulation of the RX RTL through Unix sockets
+\cite{verilator,ns3}.  TX exports each frame with the simulated time at which
+its final beat leaves the packet scheduler.  ns-3 injects the frame at that
+time, models serialization, queuing, and propagation, and forwards the arrival
+event to RX.  Timestamped advance messages coordinate the three processes.
+Thus, the network may reorder frames without replacing the production times
+chosen by the RTL.  Table~\ref{tab:eval:configuration} summarizes the archived
+configuration.
+
+\begin{table}[H]
+  \centering
+  \caption{Archived RTL/network co-simulation configuration.  Link rates and
+  the 2-ns RTL cycle are model parameters, not measurements of a placed FPGA.}
+  \label{tab:eval:configuration}
+  \small
+  \begin{tabular}{p{0.15\textwidth}p{0.79\textwidth}}
+    \toprule
+    Component & Configuration \\
+    \midrule
+    Toolchain & BSC 2023.01; Verilator 5.048; ns-3 3.48; cocotb 2.1.0.dev0 \\
+    RTL & 2-ns model cycle; 4 QPs; 4 receive lanes; messages up to 16 KiB \\
+    Receive state & 16-packet window per QP; 16 payload slots per lane;
+      4 Ordered Queue entries per QP \\
+    Network & 2 nodes; 4 independent 100-Gb/s point-to-point links;
+      100-packet queue per link \\
+    Path delay & 200 ns on all paths for rate/policy comparisons;
+      controlled skew for receive-pressure experiments \\
+    DMA model & TX completions returned in reverse batches of up to 8 requests;
+      RX completion acknowledged after payload collection \\
+    Packet profile & Private Ethernet/IPv4/UDP/BTH/RETH; ICRC and FCS omitted \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+In this profile, PMTU is a packetization budget rather than pure payload size:
+the first packet can carry PMTU$-28$ B and a continuation packet PMTU$-12$ B;
+Ethernet/IPv4/UDP framing is outside this budget.  For example, a 4-KiB message
+at a 4-KiB PMTU becomes 4,068 B plus a 28-B tail.
+The model exercises request processing, abstract DMA, packetization, path
+selection, receive-window handling, placement, and ordered retirement.  It does
+not include a physical PCIe/GPU path, a switched congestion topology, ICRC/FCS,
+or an ACK-to-TX retransmission loop.  The four equal-rate links isolate path
+selection; they do not evaluate SRv6 encapsulation.  This scope is narrower than
+deployment-scale MRC studies~\cite{mrc-srv6-paper}.
+
+\textbf{Metrics.}
+TX latency begins when RTL accepts a request and ends at either the first frame's
+start of frame (SOF) or the latest end of frame (EOF) among all packets of that
+message.  TX effective payload rate divides batch payload bits by the interval
+from the first accepted request to the last emitted frame.  Network goodput
+instead spans first frame injection to final frame arrival.  Per-message network
+completion spans that message's first injection to its final arrival, excluding
+request processing before injection and RX processing after arrival.  Because
+these metrics use different boundaries, their numeric rates must not be
+subtracted as ``network overhead.''
+
+All plotted points are deterministic finite batches without a separate warm-up
+interval; they are not steady-state NIC throughput.  The eight-message policy
+comparison supports paired means, not tail-latency estimates.  Coordination was
+checked with 100-ns, 1-$\mu$s, and 5-$\mu$s advance windows, which required 12,
+3, and 2 rounds but produced identical injection times, paths, and arrivals.
+Free-clock execution and offline replay produced the same events, and 20
+per-path packet captures matched reference bytes and timestamps.
+
+\begin{table}[tbp]
+  \centering
+  \caption{Functional checks associated with the archived experiment batch.
+  RX short and long suites overlap and are not additive coverage.}
+  \label{tab:eval:validation}
+  \scriptsize
+  \begin{tabular}{@{}p{0.27\columnwidth}p{0.43\columnwidth}p{0.20\columnwidth}@{}}
+    \toprule
+    Check & Exercised behavior & Result \\
+    \midrule
+    TX regression & Request, DMA, packets, scheduler & 64 pass \\
+    RX short & Window, placement, retirement, Flag & 37 pass; 1 skip \\
+    RX long & Extended receive/completion & 38 pass \\
+    Online reference & 6 messages, 4 QPs, unequal paths & 11/11 frames; 0 drops \\
+    Timing consistency & 3 windows, free-clock, replay & Exact match \\
+    Reverse DMA & Complete 3,2,1,0 across QPs & Retire 0,1,2,3 \\
+    Queue capacity & 1, 2, 4 Flags; fifth blocked & Overflow caught \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The one short-suite skip in Table~\ref{tab:eval:validation} is the M6
+long-only reorder case; it runs in the long suite.  The active repository has
+since evolved into M0--M8 TX/RX units plus the M9--M11 software-coordinated
+retransmission seam.  The latter is not exercised by this batch.  Moreover, the
+current tree preserves the RTL and cocotb suites but not the external ns-3
+adapter, raw event archive, or result parser used here.  We therefore treat the
+figures as archived evidence rather than claim push-button reproduction from
+the current checkout.
+
+\EvalPlanned{
+\begin{table}[tbp]
+  \centering
+  \caption{\textbf{P-XMODEL --- PLANNED MEASUREMENT -- NO DATA.}
+  Cross-model trace closure required before replacing the archived batch.}
+  \label{tab:eval:planned-xmodel}
+  \footnotesize
+  \begin{tabular}{llllll}
+    \toprule
+    Trace ID & Python/reference & BSV/Verilator & Network model & Byte match & Event-order match \\
+    \midrule
+    To measure & To archive & To archive & To archive & Exact required & Exact required \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+}
+
+\subsection{GPU-Ready to On-NIC Payload: A Code-Derived Cycle Budget}
+\label{sec:eval:submission-cycles}
+
+The packet-level results above begin after the NIC has accepted a request.  This
+subsection isolates the preceding control path because it determines how soon
+the first payload read can start.  We statically count the serialized RTL stages
+in M0 and M1, then express the external GPU, PCIe, and DMA terms symbolically.
+We do not claim a measured GPU or target-FPGA latency.
+
+% Cycle provenance (active tree):
+% M0: TxMvp.bsv issueSlotQuery 28--41, completeSlotQuery 43--73,
+% issueMrQuery 104--109, completeMrQuery 111--136,
+% completeQpReserve 138--162, issuePgtQuery 188--218,
+% completePgtQuery 220--258, emitBurst 278--324.
+% M1: DmaEngine.bsv acceptFirstChunk 180--223, allocateBurst 303--315,
+% installScheduledBurst 357--383, receiveCompletion 398--441,
+% drainLastBeat 472--508, stageOrderedBeat 604--670, payloadOut 721--730.
+% The active M0 input is already-decoded; GPU fence, credit CAS, MMIO store,
+% PCIe transport, and address-to-QPN decode are outside this RTL.
+
+\textbf{Model boundary.}
+The active M0 input is \texttt{DecodedGdrpSubmission}; the GPU-side release
+that makes payload visible, credit reservation, the 8-B Doorbell store, PCIe
+transport, and address-to-QPN decoding are outside the current RTL.  The cycle
+count below therefore starts when that decoded submission is visible at the M0
+input FIFO and ends when the first \texttt{DmaReadRequest} is accepted at the
+M1 interface.  The endpoint for payload arrival is the M1 \texttt{payloadOut}
+handshake; compaction, packetization, and M3 are excluded.  A production front
+end also needs address/QPN extraction and Doorbell field decode before this
+point; we denote that unmodelled term $D_{\mathrm{decode}}$ and do not assign
+it a cycle count.
+
+\textbf{Why the M0 path is serialized.}
+Each table query supplies the next query's key or permission.  The Slot lookup
+returns the local LKEY, remote base, and length limit; the MR lookup validates
+that LKEY and returns the PGT offset; the QP reservation returns PMTU and PSN;
+the PGT lookup translates the first physical page.  A burst splitter then emits
+a 4-KiB-safe, at-most-1-KiB DMA request.  In the functional model each table is
+a one-cycle register lookup.  At a target clock, a BRAM-backed PGT may add
+cycles; the counts in Table~\ref{tab:eval:submission-stages} are therefore a
+lower bound for this RTL organization, not a post-route timing result.
+
+\begin{table}[H]
+  \centering
+  \caption{Code-derived serialized cycle budget.  The first row starts after a
+  decoded submission is visible; all counts assume no stalls and one-cycle
+  table lookups.  ``Exported'' includes the M0--M1 handshake.}
+  \label{tab:eval:submission-stages}
+  \footnotesize
+  \begin{tabular}{@{}p{0.66\columnwidth}r@{}}
+    \toprule
+    Serialized segment & Cycles \\
+    \midrule
+    M0 Slot, MR, QP, and PGT queries plus DMA split & 12 \\
+    M0 adapter and context/chunk synchronizer & 3 \\
+    M1 normalizer, scheduler, and reorder installation & 3 \\
+    Exported DMA-request handshake & 1 \\
+    \midrule
+    Total to first external DMA request & 19 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+M0 itself needs 12 cycles: three each for the Slot, MR, and PGT
+issue/lookup/join triples, two for the QP reserve/join, and one for the burst
+splitter.  Three adapter/synchronizer hops, three M1 installation stages, and
+the exported handshake add seven cycles.  This count describes the
+\texttt{TxMvp} $\rightarrow$ \texttt{M0MessageAdapter} $\rightarrow$
+\texttt{DmaPhaseAIntegration} topology; the standalone Phase-A testbench starts
+at its own \texttt{contextIn}/\texttt{chunkIn} and is shorter.  Thus
+\begin{equation}
+  C_{\mathrm{req}} = 12 + 3 + 3 + 1 = 19
+\end{equation}
+from submission visibility to the first external DMA-request handshake.  At
+250~MHz this is 76~ns; at 500~MHz it is 38~ns.  Both are clock conversions of
+the same RTL path, not measured operating frequencies.
+
+\textbf{First payload beat.}
+The M1 completion reorder waits until the entire first chunk is received before
+it drains any beat: \texttt{recvComplete} becomes true only after the final
+128-B completion beat.  If $R$ is the request-to-first-completion delay in
+cycles and $K$ is the number of 128-B completion beats in the first DMA chunk,
+the first payload beat and the full chunk appear at
+\begin{align}
+  C_{\mathrm{first}} &= C_{\mathrm{req}} + R + K + 3, \\
+  C_{\mathrm{chunk}} &= C_{\mathrm{req}} + R + 2K + 2.
+\end{align}
+These expressions assume one completion beat per cycle, no downstream
+backpressure, and $R$ expressed in the same NIC clock; if the completion
+interface uses another clock, convert $R$ to time before adding it.
+For a 4-KiB-aligned 1-KiB chunk, $K=8$, so the first beat is $R+30$ and the
+complete chunk is $R+37$; an unaligned chunk has $K=9$ and adds one cycle to
+each.  The $K+3$ term is a deliberate consequence of whole-chunk reordering,
+not a PCIe limit.  A streaming reorder policy could expose the first beat
+earlier, but would no longer guarantee that the chunk's beats leave in order.
+
+\textbf{Comparison with IBGDA.}
+A conventional GPU-initiated RDMA path first writes a WQE and doorbell record,
+then rings the NIC doorbell; the NIC fetches the WQE before it can issue the
+payload DMA.  IBGDA and GDAKI move the queue and doorbell into GPU-accessible
+memory, but retain WQE construction and NIC WQE fetch~\cite{nvshmem-ibgda,baydamirli2026gpu}.
+A recent measurement of minimal GPU-initiated transports reports that
+WQE construction, doorbell-record update, and the doorbell store alone cost
+0.70~$\mu$s in \emph{mini-gda}, and 5.31~$\mu$s in the NVSHMEM public path on
+an H200/CX-7 200-Gb/s InfiniBand platform~\cite{baydamirli2026gpu}.  These are
+GPU-side issue times, not NIC-internal cycles.
+
+\begin{table}[H]
+  \centering
+  \caption{Published p50 issue and put+completion times for one 8-B operation
+  on H200/CX-7 200-Gb/s IB~\cite{baydamirli2026gpu}.  kSM-cycle columns are our
+  conversion at an assumed 2.0-GHz SM clock, not reported by the authors.}
+  \label{tab:eval:ibgda}
+  \scriptsize
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+    Path & Issue & Put+comp. & Issue & Put+comp. \\
+    & ($\mu$s) & ($\mu$s) & (kSM cyc.) & (kSM cyc.) \\
+    \midrule
+    mini-gda, inline & 0.70 & 4.03 & 1.4 & 8.1 \\
+    GDAKI, inline & 1.60 & 6.02 & 3.2 & 12.1 \\
+    NVSHMEM, internal & 4.26 & 9.18 & 8.5 & 18.4 \\
+    NVSHMEM, public & 5.31 & 11.10 & 10.6 & 22.2 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The measured 0.70-$\mu$s issue floor is 1.4k SM cycles at 2~GHz.  The
+OpenRDMA M0 path is 12 \emph{NIC} cycles, or 24--60~ns at 200--500~MHz.
+These quantities are in different clock domains and must not be subtracted as
+cycles.  Their comparison is meaningful only in time: the on-NIC lookup is
+small relative to the measured GPU issue floor, so the GPU fence, MMIO write,
+and PCIe transport—not the four table lookups—are the likely dominant terms.
+
+The architectural difference is better seen as a transaction count.  For one
+1-KiB operation, Table~\ref{tab:eval:transactions} lists the control and data
+movement.  IBGDA must publish a WQE and a doorbell record, and the NIC must
+fetch the WQE before it can fetch the payload.  OpenRDMA publishes only the
+8-B Doorbell; its Slot, MR, QP, and PGT state lives on the NIC, so there is no
+WQE fetch.  The NIC-side replacement is the 12-cycle M0 lookup/split path.
+
+\begin{table}[H]
+  \centering
+  \caption{Submission-path transactions for one 1-KiB operation.  WQE sizes
+  are at least one 64-B basic block~\cite{baydamirli2026gpu}; payload is
+  fetched by the NIC in both designs.}
+  \label{tab:eval:transactions}
+  \footnotesize
+  \begin{tabular}{@{}p{0.20\columnwidth}p{0.42\columnwidth}p{0.27\columnwidth}@{}}
+    \toprule
+    Path & GPU-side publication & NIC-side dependent reads \\
+    \midrule
+    OpenRDMA & 8-B Doorbell & payload only \\
+    IBGDA & WQE + dbrec + 8-B Doorbell & WQE, then payload \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Assuming the same GPU release, Doorbell write, PCIe transport, and payload
+read, let $T_{\mathrm{IBGDA}}$ and $T_{\mathrm{OpenRDMA}}$ denote data-ready
+to first on-NIC payload; the mechanism difference is
+\begin{equation}
+  T_{\mathrm{IBGDA}} - T_{\mathrm{OpenRDMA}}
+  \approx T_{\mathrm{WQE\ build}} + T_{\mathrm{dbrec}}
+  + T_{\mathrm{WQE\ fetch}} - \frac{12}{f_{\mathrm{NIC}}}.
+\end{equation}
+The equation isolates the WQE work that OpenRDMA removes and the local table
+path it adds.  It does not predict an end-to-end speedup: the common GPU fence,
+MMIO, and PCIe terms are absent from the active RTL and are not measured here.
+A same-platform experiment must measure those terms for both designs; comparing
+the 0.70-$\mu$s GPU issue floor with NIC RTL cycles directly would be invalid.
+
+The model also explains why the M0 cycle count should not be optimized in
+isolation.  At 250~MHz the complete request path is 76~ns, while the measured
+minimal GPU issue alone is 700~ns.  The useful architectural claim is therefore
+narrow: OpenRDMA removes WQE construction and a dependent WQE fetch from the
+NIC's critical path, and replaces them with a 12-cycle on-NIC table path.  It
+does not establish a lower GPU-to-NIC latency without a matched
+GPU/PCIe/fence measurement.
+
+\subsection{RQ1: Where Does the TX Pipeline Spend Time?}
+\label{sec:eval:tx}
+
+Figure~\ref{fig:eval:tx-latency} separates startup from complete message
+emission.  At a 4-KiB PMTU, a 64-B request starts its first packet after 102 ns
+and finishes after 118 ns.  For 16 KiB, these boundaries are 510 ns and 1,738 ns.
+The first-packet delay is also 510 ns at 8 KiB, while latest EOF continues to
+increase with message size; startup and drain are therefore distinct costs.
+
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.78\textwidth]{\EvalFigureRoot/eval-preview-fig1-tx-latency.pdf}
+  \caption{Isolated TX timing from request acceptance in deterministic runs.
+  Panel (a) uses a 4-KiB PMTU; panel (b) uses a 2-KiB message.  ``All packets
+  emitted'' uses the latest EOF, including when a small tail finishes before an
+  earlier large packet.}
+  \label{fig:eval:tx-latency}
+\end{figure}
+
+Segmentation makes the completion boundary consequential.  In the 4-KiB case,
+the 28-B tail reaches EOF at 380 ns, before the 4,068-B first fragment; the
+message leaves TX only at 942 ns.  Treating the highest packet index as message
+completion would underestimate emission by 562 ns.  For a fixed 2-KiB message,
+reducing PMTU from 4,096 B to 256 B changes the packet count from one to nine and
+reduces latest EOF from 522 ns to 284 ns in this model.  This result reflects
+parallel output lanes; it does not establish a network-optimal PMTU because it
+does not price all real wire and receiver costs.
+
+Figure~\ref{fig:eval:tx-rate} next exposes startup/drain and DMA dependence.  For
+1-KiB messages, increasing a four-QP batch from 32 to 128 requests raises TX
+effective payload rate from 175.2 to 201.9 Gb/s.  The corresponding network
+goodputs are 177.9 and 202.8 Gb/s, but their start boundaries differ.  At 64 B,
+TX reaches 38.3 and 47.2 Gb/s; at 16 KiB, 123.0 and 124.9 Gb/s.  Thus, larger
+messages do not automatically maximize rate in the current pipeline/model.
+
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.78\textwidth]{\EvalFigureRoot/eval-preview-fig2-tx-rate.pdf}
+  \caption{Finite-batch TX effective payload rate with four active QPs and
+  200-ns propagation on each of four paths.  (a) Deterministic 32- and
+  128-message batches amortize startup and drain differently.  (b) Added wait
+  before each abstract DMA completion lowers the rate of a 32-message, 1-KiB
+  workload.}
+  \label{fig:eval:tx-rate}
+\end{figure}
+
+Adding 40 or 200 ns (20 or 100 model cycles) before each DMA completion lowers
+the 1-KiB, 32-message rate from 175.2 Gb/s to 104.1 or 34.3 Gb/s.  Four egress
+paths cannot compensate for payload that has not reached packetization.  These
+traces establish a DMA-availability dependency, but not its attribution to a
+specific RTL queue or physical PCIe transaction.
+
+\EvalPlanned{
+\begin{table}[tbp]
+  \centering
+  \caption{\textbf{P-CYCLE --- PLANNED MEASUREMENT -- NO DATA.}
+  TX and RX cycle breakdowns use distinct semantic endpoints.}
+  \label{tab:eval:planned-cycle}
+  \scriptsize
+  \begin{tabular}{@{}lp{0.20\textwidth}lllll@{}}
+    \toprule
+    TX source & Configuration & Source--DMA req. & DMA done--M2 & M2--commit enqueue & EOF dequeue & Notify delay \\
+    \midrule
+    M0 or integration & Payload, PMTU, QPs, delay, backpressure & \multicolumn{5}{c}{To measure in model cycles} \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.4em}
+  \begin{tabular}{@{}lp{0.20\textwidth}lllll@{}}
+    \toprule
+    RX source & Configuration & SOF--parse & Parse--admit & Admit--DMA req. & DMA cpl.--retire & Retire--CQE/Flag \\
+    \midrule
+    M4 wire ingress & Payload, PMTU, QPs, order, backpressure & \multicolumn{5}{c}{To measure in model cycles} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+}
+
+\subsection{RQ2: When Does Packet Spraying Help?}
+\label{sec:eval:spraying}
+
+We compare implemented round-robin spraying among ready paths with fixed
+per-QP placement using the low two QPN bits.  Each pair has the same offered
+sequence of eight messages, size, QP assignment, 4-KiB PMTU, and four 200-ns
+paths.  Policy-dependent backpressure may still change request acceptance and
+frame injection.  Fixed placement is therefore an implementation-level
+path-selection baseline, not a comparison with a commercial RNIC.
+
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.80\textwidth]{\EvalFigureRoot/eval-preview-fig3-path-policy.pdf}
+  \caption{Packet spraying versus one fixed path per QP for deterministic
+  eight-message batches at a 4-KiB PMTU on four 200-ns paths.  The upper row
+  reports batch network goodput; the lower row reports mean
+  first-injection-to-last-arrival completion.}
+  \label{fig:eval:path-policy}
+\end{figure}
+
+With one active QP, fixed placement leaves three paths idle.  Spraying raises
+1-KiB goodput from 48.0 to 119.2 Gb/s ($2.48\times$) and 16-KiB goodput from
+53.8 to 123.5 Gb/s ($2.30\times$).  For 16 KiB, mean network completion falls
+from 2.287 to 1.183 $\mu$s.  A 1-KiB message is one packet whose 287.68-ns
+injection-to-arrival latency does not change; its gain comes from placing
+successive messages of one QP on different links, not from accelerating a
+packet.
+
+As active QPs increase, fixed placement occupies more links.  At four QPs, both
+1-KiB policies reach 119.2 Gb/s.  For 4-KiB messages the result reverses: fixed
+placement reaches 157.9 Gb/s, while spraying reaches 116.2 Gb/s, 26.4\% lower;
+mean completion is 0.538 versus 1.140 $\mu$s.  Each message consists of a
+4,068-B fragment and a 28-B tail.  Spraying assigns 12,204, 8,192, 8,164, and
+4,208 payload bytes to the four paths, whereas fixed placement assigns 8,192 B
+to each.  Packet-opportunity balance is not byte balance, and the small tail
+also changes the emission schedule.  The experiment does not isolate these two
+causes, so the supported conclusion is conditional: spraying helps when QP
+count underutilizes paths, but packet-granular round robin is not uniformly
+better near segmentation boundaries.
+
+\subsection{RQ3: How Much Path Skew Can RX Absorb?}
+\label{sec:eval:rx-skew}
+
+A 1-KiB message at a 1-KiB PMTU produces 996-B and 28-B packets.  We hold three
+paths at 200 ns and add 0--2,000 ns to the fourth.  In a two-message, one-QP
+burst, mean network completion is 414.44 ns at 0 and 200 ns of extra delay, then
+560.08, 810.08, and 1,310.08 ns at 500, 1,000, and 2,000 ns.  Initially the
+delayed tail is not the message's final arrival; once it is, completion follows
+that path's additional delay.
+
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.78\textwidth]{\EvalFigureRoot/eval-preview-fig4-rx-skew.pdf}
+  \caption{Receive behavior for deterministic 1-KiB messages at a 1-KiB PMTU,
+  with three 200-ns paths and one slower path.  (a) Mean network completion for
+  a two-message, one-QP burst.  (b) Sampled largest passing and smallest failing
+  one-QP bursts; markers are not measured occupancy or a general capacity bound.}
+  \label{fig:eval:rx-skew}
+\end{figure}
+
+Longer bursts expose a separate receiver limit.  At equal path delay, 11
+messages pass and 12 fail; with 1,000 or 2,000 ns of extra delay, nine pass and
+ten fail.  At 200 and 500 ns the sampled pairs are 13/14 and 12/13.  Failure is
+\texttt{RX\_OUT\_OF\_WINDOW}, not network loss: every frame arrives in the
+recorded failing runs.  Equal propagation also does not guarantee in-order RTL
+input because small tails and packets on different lanes have different
+serialization histories.  The non-monotonic 200-ns point is a property of this
+schedule, not evidence that delay increases capacity.  Without a closed
+retransmission loop, a rejected packet cannot be recovered in this batch.
+
+\EvalPlanned{
+\begin{table}[tbp]
+  \centering
+  \caption{\textbf{P-SCALE --- PLANNED MEASUREMENT -- NO DATA.}
+  Steady-state and robustness sweep; stochastic rows require fixed seed sets
+  and 95\% confidence intervals.}
+  \label{tab:eval:planned-scale}
+  \footnotesize
+  \begin{tabular}{llllllll}
+    \toprule
+    QPs & Window & Burst/loss/skew & Warm-up & Measure & Drain & Goodput/FCT & Occupancy/stall/failure \\
+    \midrule
+    To sweep & To sweep & To sweep & To define & To define & Excluded & P50/P95/P99 & To record \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+}
+
+\subsection{RQ4: What Does Ordered Completion Cost?}
+\label{sec:eval:ordering}
+
+We isolate the Ordered Queue because packet arrival alone does not authorize an
+Ordered Flag.  The testbench enqueues a Flag, injects retirement evidence at a
+controlled barrier, and optionally stalls the output.  The retirement event is
+an RTL input in this experiment, not a measured GPU-memory DMA completion.
+
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.78\textwidth]{\EvalFigureRoot/eval-preview-fig5-ordered-completion.pdf}
+  \caption{Controlled ordering tests.  (a) Flag release with delayed retirement
+  and output backpressure; one model cycle is 2 ns.  (b) Four QPs complete in
+  order 3,2,1,0 but retire in order 0,1,2,3; delaying QP 0 transfers its delay to
+  already-completed QP 3.}
+  \label{fig:eval:ordered-completion}
+\end{figure}
+
+With no output stall, retirement delays of 0, 20, and 100 cycles produce observed
+Flag enqueue-to-acceptance times of 10, 50, and 210 ns.  Combining 20 cycles of
+retirement delay with 20 cycles of output stall yields 90 ns.  In the 100-cycle
+case, retirement evidence is accepted at 202 ns, the request becomes ready at
+208 ns, and it is accepted at 210 ns; credit is dequeued at 212 ns and the
+modeled response at 214 ns.  The two-nanosecond gaps include sequential
+testbench drive/drain cadence and are not intrinsic interface-latency claims.
+Capacity tests return one, two, and four credits for the corresponding released
+Flags and detect a fifth insertion into a blocked four-entry queue.
+
+The second experiment places one request from each of four QPs on different DMA
+lanes and completes them in reverse order.  Retirement remains 0,1,2,3.  QP 3,
+which completes first, waits 34 ns in the baseline and 1,034 ns when QP 0 is
+delayed by 1,000 ns.  QP 0's own completion-to-retire interval remains 6 ns.
+Thus a delayed global head transfers essentially all of its delay to unrelated,
+already-completed QPs.  Per-QP retirement may remove this cross-QP HoL, but its
+state and arbitration cost have not been evaluated.
+
+\subsection{RQ5: Established Cost and Remaining Evidence}
+\label{sec:eval:cost}
+
+Table~\ref{tab:eval:logical-state} groups the declared entry data in the
+archived RTL inventory.  The listed structures contain 2,586,432 logical bits
+(315.73 KiB).  RX payload-frame storage contributes 260 KiB; the four per-QP
+Ordered Queues together hold only 416 B of entry data.  Within this inventory,
+payload buffering rather than Flag metadata dominates.  Increasing Flag queue
+space would not address receive-window pressure or global-retirement blocking.
+
+\begin{table}[tbp]
+  \centering
+  \caption{Logical state footprint of listed structures.  Counts are declared
+  entry data, not placed FPGA memory or a complete-tree resource estimate.}
+  \label{tab:eval:logical-state}
+  \footnotesize
+  \begin{tabular}{p{0.61\columnwidth}rr}
+    \toprule
+    Structure & Logical bits & KiB \\
+    \midrule
+    RX payload frame storage & 2,129,920 & 260.00 \\
+    TX channel payload storage & 262,144 & 32.00 \\
+    TX DMA completion reorder & 158,848 & 19.39 \\
+    RX pending-packet table & 13,888 & 1.70 \\
+    Per-QP Ordered Queues & 3,328 & 0.41 \\
+    Other listed state & 18,304 & 2.23 \\
+    \midrule
+    Total listed capacity & 2,586,432 & 315.73 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Logical bits are not FPGA resource utilization: synthesis may repack memories
+and add FIFOs, control, routing, and vendor-IP cost.  We therefore keep this
+inventory separate from target-device implementation evidence, as is necessary
+in FPGA system evaluations~\cite{wang2023cxloverethernet}.  A historical
+standalone M1 synthesis artifact is excluded because its Fitter failed and it
+has no placed timing result.  Credible FCCM implementation evidence still
+requires a controlled top and SDC, successful synthesis/Fitter/TimeQuest,
+module and total ALM/LUT/FF/BRAM/DSP usage, target clock, WNS/TNS, and post-route
+Fmax.  Target-clock feasibility must not be inferred from the 2-ns model cycle.
+
+\EvalPlanned{
+\begin{table}[tbp]
+  \centering
+  \caption{\textbf{P-SYNTH --- PLANNED MEASUREMENT -- NO DATA.}
+  Existing module/tops are reported separately; a full M0--M11 top is blocked
+  because the three integrations are not connected.}
+  \label{tab:eval:planned-synth}
+  \scriptsize
+  \begin{tabular}{@{}lllllll@{}}
+    \toprule
+    Component/top & Evidence stage & Status & ALM/LUT--FF & RAM--DSP & Target--WNS/TNS & Fmax \\
+    \midrule
+    M0, M1, M2, M3 & Post-route required & Not run & -- & -- & -- & -- \\
+    M4--M8, \texttt{RxTop} & Post-route required & Not run & -- & -- & -- & -- \\
+    M9--M11, \texttt{RetxTop} & Post-route required & Not run & -- & -- & -- & -- \\
+    Full M0--M11 top & N/A & Blocked: top does not exist & -- & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+}
+
+\begin{table}[tbp]
+  \centering
+  \caption{Evidence closure for an FCCM implementation evaluation.  The right
+  column states required measurements, not inferred results.}
+  \label{tab:eval:evidence-closure}
+  \scriptsize
+  \begin{tabular}{@{}p{0.25\columnwidth}p{0.31\columnwidth}p{0.34\columnwidth}@{}}
+    \toprule
+    Dimension & Evidence here & Required closure \\
+    \midrule
+    Function & Archived co-simulation and controlled RTL tests & Restore trace-level cross-model artifact \\
+    Cycle cost & Endpoint intervals under abstract DMA & Stage, stall, and occupancy counters \\
+    Scale/robustness & Finite batches and sampled skew boundary & Warm-up-separated, multi-seed QP/loss sweeps \\
+    Resources & 315.73 KiB listed logical state & Successful Fitter/TimeQuest and post-route report \\
+    Recovery & M9--M11 functional seam outside this batch & Connect M3, M6, runtime, and retry egress \\
+    Physical system & Not measured & PCIe/MAC/GPU throughput, latency, and power \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The present evidence establishes functional datapath execution, conditional
+multipath gains, schedule-specific sampled receive-window pass/fail boundaries,
+cross-QP ordering cost, and a logical-state baseline.  It does not establish physical-NIC throughput,
+GPU-visible completion latency, closed-loop loss recovery, SRv6 cost,
+target-FPGA frequency, measured power, or application speedup.  Completing the
+evaluation requires (i) event-level closure among the reference model, RTL, and
+restored network harness; (ii) explicit pipeline latency, occupancy, and stall
+counters; (iii) warm-up/steady-state/drain-separated QP, window, skew, and loss
+sweeps; and (iv) successful target-device place-and-route followed by physical
+PCIe/MAC/GPU measurements.  These additions strengthen the evidence level
+without changing the negative results and scope boundaries reported above.

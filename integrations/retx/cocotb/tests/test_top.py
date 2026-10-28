@@ -11,13 +11,15 @@ from openrdma_flow.retx.codec import decode, validate_report  # noqa: E402
 
 W = {
     "qp": [("qpn", 24), ("qpEpoch", 16), ("initialPsn", 24), ("enable", 1)],
-    "wqe": [("qpn", 24), ("qpEpoch", 16), ("requestId", 16), ("psnBase", 24),
-            ("psnCount", 18), ("packetCount", 18), ("pmtu", 3),
+    "wqe": [("qpn", 24), ("destQpn", 24), ("qpEpoch", 16), ("requestId", 16),
+            ("psnBase", 24), ("psnCount", 18), ("packetCount", 18), ("pmtu", 3),
             ("messageLength", 25), ("remoteAddr", 64), ("remoteKey", 32),
             ("opcode", 8), ("slotId", 18), ("wireProfile", 2), ("evProfile", 2),
             ("mrcMsn", 16), ("msnValid", 1)],
     "reserve": [("qpn", 24), ("qpEpoch", 16), ("psn", 24), ("requestId", 16),
-                ("packetIndex", 18), ("packetCount", 18), ("recordHandle", 32),
+                ("packetIndex", 18), ("packetCount", 18), ("messageOffset", 25),
+                ("payloadLength", 13), ("messageLength", 25), ("opcode", 8),
+                ("first", 1), ("last", 1), ("recordHandle", 32),
                 ("replayHandle", 32)],
     "sent": [("qpn", 24), ("qpEpoch", 16), ("psn", 24), ("packetIndex", 18),
              ("recordHandle", 32), ("replayHandle", 32), ("commitToken", 32)],
@@ -42,10 +44,11 @@ W = {
               ("length", 13), ("token", 32)],
     "beat": [("fetchId", 16), ("data", 1024), ("keep", 128), ("sop", 1),
              ("eop", 1), ("valid", 1), ("last", 1)],
-    "m3desc": [("qpn", 24), ("qpEpoch", 16), ("requestId", 16), ("psn", 24),
-               ("packetIndex", 18), ("packetCount", 18), ("pmtu", 3), ("opcode", 8),
-               ("remoteAddr", 64), ("remoteKey", 32), ("messageOffset", 25),
-               ("payloadLength", 13), ("first", 1), ("last", 1), ("wireProfile", 2),
+    "m3desc": [("qpn", 24), ("destQpn", 24), ("qpEpoch", 16), ("requestId", 16),
+               ("psn", 24), ("packetIndex", 18), ("packetCount", 18), ("pmtu", 3),
+               ("opcode", 8), ("remoteAddr", 64), ("remoteKey", 32),
+               ("messageOffset", 25), ("payloadLength", 13), ("messageLength", 25),
+               ("first", 1), ("last", 1), ("wireProfile", 2),
                ("evProfile", 2), ("mrcMsn", 16)],
     "result": [("retryRequestId", 32), ("hostSessionId", 32), ("nicSessionId", 32),
                ("qpn", 24), ("qpEpoch", 16), ("psn", 24), ("status", 8),
@@ -80,7 +83,7 @@ async def test_joint_recovery_loop(dut):
                    pack(W["qp"], dict(qpn=0, qpEpoch=1, initialPsn=100, enable=1)))
 
     await send(dut, "wqeRegisterIn", pack(W["wqe"], dict(
-        qpn=0, qpEpoch=1, requestId=42, psnBase=100, psnCount=4,
+        qpn=0, destQpn=0, qpEpoch=1, requestId=42, psnBase=100, psnCount=4,
         packetCount=4, pmtu=2, messageLength=1024, remoteAddr=0x1122,
         remoteKey=0xCAFE, opcode=0x0A, slotId=1)))
     handle = (await recv(dut, "wqeRegisterRespOut")) & 0xFFFFFFFF
@@ -89,7 +92,9 @@ async def test_joint_recovery_loop(dut):
     for idx in range(4):
         await send(dut, "packetReserveIn", pack(W["reserve"], dict(
             qpn=0, qpEpoch=1, psn=100 + idx, requestId=42,
-            packetIndex=idx, packetCount=4, recordHandle=handle)))
+            packetIndex=idx, packetCount=4, messageOffset=idx * 256,
+            payloadLength=256, messageLength=1024, opcode=0x0A,
+            first=int(idx == 0), last=int(idx == 3), recordHandle=handle)))
         g = unpack(W["grant"], await recv(dut, "packetGrantOut"))
         assert g["ok"] == 1
         replays.append(g["replayHandle"])
@@ -120,6 +125,9 @@ async def test_joint_recovery_loop(dut):
     assert header["qpn"] == 0 and header["hole_count"] == 2, header
     holes = [unpack(W["hole"], await recv(dut, "reportEntryOut")) for _ in range(2)]
     assert [h["psn"] for h in holes] == [101, 103], holes
+    assert holes[0]["message_offset"] == 256 and holes[0]["payload_length"] == 256
+    assert holes[1]["message_offset"] == 768 and holes[1]["payload_length"] == 256
+    assert holes[0]["packet_index"] == 1 and holes[1]["packet_index"] == 3
     notif = await recv(dut, "notificationOut")
     assert notif != 0
 
@@ -140,6 +148,8 @@ async def test_joint_recovery_loop(dut):
         sop=1, eop=1, valid=1, last=1)))
     desc = unpack(W["m3desc"], await recv(dut, "m3DescOut"))
     assert desc["psn"] == target["psn"]
+    assert desc["messageOffset"] == 256 and desc["messageLength"] == 1024
+    assert desc["payloadLength"] == 256 and desc["destQpn"] == 0
     m3raw = await recv(dut, "m3BeatOut")
     assert (m3raw >> 1) & 1 == 1  # MSB-first: eop bit0, sop bit1
     r1 = unpack(W["result"], await recv(dut, "resultOut"))

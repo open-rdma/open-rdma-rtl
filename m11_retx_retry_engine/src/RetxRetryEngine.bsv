@@ -108,7 +108,8 @@ module mkRetxRetryEngine(RetxRetryEngineIfc);
         beatQ.deq;
         if (!descSent) begin
             RetxM3DescHw d = unpack(0);
-            d.qpn = cur.qpn; d.qpEpoch = cur.qp_epoch;
+            d.qpn = cur.qpn; d.destQpn = grant.destQpn;
+            d.qpEpoch = cur.qp_epoch;
             d.requestId = grant.requestId; d.psn = cur.psn;
             d.packetIndex = grant.packetIndex;
             d.packetCount = grant.packetCount;
@@ -116,6 +117,7 @@ module mkRetxRetryEngine(RetxRetryEngineIfc);
             d.remoteAddr = grant.remoteAddr; d.remoteKey = grant.remoteKey;
             d.messageOffset = grant.messageOffset;
             d.payloadLength = grant.payloadLength;
+            d.messageLength = grant.messageLength;
             d.first = grant.first; d.last = grant.last;
             d.wireProfile = grant.wireProfile; d.evProfile = grant.evProfile;
             d.mrcMsn = grant.mrcMsn;

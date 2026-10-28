@@ -1,4 +1,5 @@
 import cocotb
+from cocotb.utils import get_sim_time
 
 from bfm.tx import TB, configure, configure_basic, pipe_get
 from model.tx import (
@@ -195,3 +196,59 @@ async def qp_psn_state_is_independent_and_wraps_at_24_bits(dut):
             await pipe_get(tb.dma, tb.clock),
             event=f"qp={int(submission.qpn)}",
         )
+
+
+@cocotb.test(timeout_time=2_000_000, timeout_unit="ns")
+async def sustained_single_chunk_request_rate_exceeds_400_gbps(dut):
+    """M0 lookup pipeline 的 steady-state request 供给不能限制 400 Gb/s。"""
+    tb = TB(dut)
+    await tb.reset()
+    model = TxReferenceModel()
+    await configure_basic(
+        tb,
+        model,
+        max_len=4096,
+        mr_length=4096,
+        pmtu=4,
+    )
+
+    submissions = [
+        DecodedGdrpSubmission(
+            qpn=0,
+            token=make_token(slot_id=0, length=1024, debug_seq=index & 0xF),
+        )
+        for index in range(128)
+    ]
+    expected = [model.submit(submission)[0] for submission in submissions]
+    accept_ps: list[int] = []
+    request_ps: list[int] = []
+
+    async def produce() -> None:
+        for submission in submissions:
+            await tb.submission.enq(submission.pack())
+            accept_ps.append(int(get_sim_time("ps")))
+
+    async def consume() -> None:
+        for index, expected_request in enumerate(expected):
+            actual = await pipe_get(tb.dma, tb.clock)
+            request_ps.append(int(get_sim_time("ps")))
+            TxScoreboard.compare(
+                expected_request, actual, event=f"throughput[{index}]"
+            )
+
+    producer = cocotb.start_soon(produce())
+    consumer = cocotb.start_soon(consume())
+    await producer
+    await consumer
+
+    start = 16
+    end = len(request_ps) - 17
+    duration_ps = request_ps[end] - request_ps[start]
+    rate = (end - start) * 1024 * 8 * 1000 / duration_ps
+    dut._log.info(
+        "M0 稳态 DMA request：submission=%d，request=%d，rate=%.3f Gb/s",
+        len(accept_ps),
+        len(request_ps),
+        rate,
+    )
+    assert rate >= 400.0, f"M0 steady-state rate={rate:.3f} Gb/s"

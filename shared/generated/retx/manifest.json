@@ -1,8 +1,8 @@
 {
   "files": {
-    "shared/contracts/retx/schema.py": "e7c01dc3b790b6e84db86d9643922ba9fdd634e25c78a0f9a44f0d0c6fec2eb4",
+    "shared/contracts/retx/schema.py": "23a007a744a9b776ef6ea801463d27ec434d27ad8f7f596ff29233950bbd4cc4",
     "shared/contracts/retx/tools/generate.py": "6733fb0c9915723db427c3ae41ad4126f2bbf72b4560ea7fadc0ef175747ca1e",
-    "shared/generated/retx/bsv/RetxTypes.bsv": "1df54e95d08a1b586de9996cbba3540898c789d0213201c681846338be8af77e",
+    "shared/generated/retx/bsv/RetxTypes.bsv": "bd3c845efb2a586750c983594a363c2eb94dffba988a3d4229bb2fa9cae4ac64",
     "shared/generated/retx/golden/vectors.json": "25fb7f69a0c2a60fbd5c14c5e47a8c812f168b5a2545e9876139a51a86984489",
     "shared/generated/retx/python/openrdma_flow/__init__.py": "317120497d11d113b292f213ea61d2f2577989e4e60f70d2d02ac5591f1b3c5b",
     "shared/generated/retx/python/openrdma_flow/retx/__init__.py": "93a61bb24edfbb66d9f98c35b295f7ee0305ad9f8800c441f63ec98ede207664",

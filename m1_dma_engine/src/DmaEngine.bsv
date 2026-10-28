@@ -3,6 +3,7 @@ package DmaEngine;  // 包是 bsv 中编译和命名空间的基本单位
 import Assert :: *; // 导入所有公开符号，通常用于断言、形式验证或仿真检查，例如 assert、assume、cover 等。
 import Connectable :: *;    // 提供类型类 Connectable#(a, b) 和连接函数 mkConnection，用于把两个模块或接口连接起来。
 import FIFOF :: *;  // 用于 FIFO 队列的实现和操作，例如 mkSizedFIFOF、enq、deq、notEmpty、notFull 等。
+import SpecialFIFOs :: *;
 import Vector :: *; // 用于向量类型的定义和操作，例如 Vector#(N, T)、replicateM、unpack、pack 等。
 
 import CommonTypes :: *;    // 自定义公共类型包
@@ -273,7 +274,7 @@ endinterface
 module mkOrderedDmaReadScheduler(DmaOrderedSchedulerIfc);
     FIFOF#(DmaBurstDescriptor) burstQ <- mkSizedFIFOF(2);
     FIFOF#(ScheduledBurst) scheduledQ <- mkSizedFIFOF(2);
-    FIFOF#(DmaSlotRetire) retireQ <- mkSizedFIFOF(2);
+    FIFOF#(DmaSlotRetire) retireQ <- mkBypassFIFOF;
 
     // freeMask=1 表示可分配。每个 slot 独立维护 generation，slot 回收时
     // generation+1，避免普通 late completion 命中新事务。
@@ -335,9 +336,9 @@ endinterface
 module mkDmaCompletionReorder(DmaCompletionReorderIfc);
     FIFOF#(ScheduledBurst) scheduledQ <- mkSizedFIFOF(2);
     FIFOF#(DmaReadRequest) dmaReqQ <- mkSizedFIFOF(2);
-    FIFOF#(DmaCompletionBeat) completionQ <- mkSizedFIFOF(2);
-    FIFOF#(DmaOrderedBeat) orderedQ <- mkSizedFIFOF(2);
-    FIFOF#(DmaSlotRetire) retireQ <- mkSizedFIFOF(2);
+    FIFOF#(DmaCompletionBeat) completionQ <- mkPipelineFIFOF;
+    FIFOF#(DmaOrderedBeat) orderedQ <- mkPipelineFIFOF;
+    FIFOF#(DmaSlotRetire) retireQ <- mkBypassFIFOF;
     FIFOF#(DmaTag) issueOrderQ <- mkSizedFIFOF(8);
 
     // ctx* 保存每个 outstanding chunk 的恢复信息；receive* 只负责接收
@@ -531,7 +532,7 @@ endinterface
 module mkDmaMessageTransferTracker(DmaMessageTrackerIfc);
     FIFOF#(DmaMessageRegistration) registrationStageQ <- mkSizedFIFOF(2);
     FIFOF#(DmaMessageRegistration) registrationQ <- mkSizedFIFOF(8);
-    FIFOF#(DmaOrderedBeat) orderedQ <- mkSizedFIFOF(2);
+    FIFOF#(DmaOrderedBeat) orderedQ <- mkPipelineFIFOF;
 
     // payload queue 使用显式 head/tail + DWire commit，允许 consumer deq 与
     // stageOrderedBeat enq 同拍提交，避免普通FIFOF method conflict造成半速。

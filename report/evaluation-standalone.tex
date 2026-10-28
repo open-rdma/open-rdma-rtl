@@ -1,0 +1,37 @@
+% 独立编译 wrapper；正文见 evaluation.tex。
+\pdfminorversion=7
+\documentclass[10pt,conference,onecolumn]{IEEEtran}
+
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{float}
+\usepackage{cite}
+\usepackage{microtype}
+\usepackage{url}
+
+\newcommand{\EvalFigureRoot}{figures}
+\newif\ifEvalDraft
+\EvalDraftfalse
+\ifdefined\EVALDRAFT
+  \edef\EvalDraftValue{\EVALDRAFT}
+  \def\EvalDraftEnabled{1}
+  \ifx\EvalDraftValue\EvalDraftEnabled
+    \EvalDrafttrue
+  \fi
+\fi
+\ifEvalDraft
+  \newcommand{\EvalPlanned}[1]{#1}
+\else
+  \newcommand{\EvalPlanned}[1]{}
+\fi
+
+\begin{document}
+\setcounter{section}{5}
+\input{evaluation}
+
+\bibliographystyle{IEEEtran}
+\bibliography{evaluation}
+\end{document}
