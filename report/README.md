@@ -100,22 +100,20 @@ Caption 在 `evaluation.tex` 中重新排版，因此裁剪图不包含原 capti
 | Active M0–M8 tree | 用当前 README/RTL 校准信号和模块语义 | 模块化 BSV implementation、abstract DMA/wire interfaces | 真实 PCIe/GPU/MAC、MRC RX、ICRC/FCS |
 | M9–M11 Retx seam | 只映射到 planned closed-loop 工作 | 当前为 M9/M10/M11 functional seam | 已接 M3/M6/runtime、完整 loss recovery |
 | Logical state | 重排 preview Table 3 | 列出结构的 315.73 KiB logical entry data | full design BRAM/ALM、placed resource savings |
-| Code-derived submission cycles | 从 `TxMvp.bsv`、`DmaEngine.bsv` 的 rule/FIFO 串行路径推导 12/19 cycles | 该 RTL 组织、无 stall、一周期表查询下的结构性下界 | 实测 GPU/PCIe latency、post-route Fmax、完整端到端加速 |
+| Code-derived submission cycles | 从 `TxMvp.bsv`、`DmaEngine.bsv` 的 rule/FIFO 串行路径推导 23/33 cycles | 该 RTL 组织、无 stall、一周期表查询下的结构性下界 | 实测 GPU/PCIe latency、post-route Fmax、完整端到端加速 |
 | IBGDA comparison | 使用 arXiv:2610.01380 的 p50 测量作为外部锚点，按 2 GHz 换算 kSM cycles | 同一 H200/CX-7 平台上的 GPU-side issue/completion 量级 | 把 GPU SM cycles 与 NIC RTL cycles直接相减、声称同平台优劣势 |
 | Historical M1 synthesis | 只记录排除理由，不进入正文结果表 | 曾有 standalone Analysis & Synthesis artifact | full-NIC resource、Fmax、timing closure |
 | Planned measurements | 仅在 draft 和 checklist 中出现 | measurement protocol 已定义 | 任何结果值 |
 
 ### Code-derived submission cycle model
 
-正文的 12/19-cycle 结果来自当前 active RTL 的串行 rule/FIFO 路径，而不是 cocotb 实测：
+正文的 23/33-cycle 结果来自当前 active RTL 的串行 rule/FIFO 路径，而不是 cocotb 实测：
 
-- M0：Slot、MR、QP、PGT 四组查询/join 加 burst split = 12 cycles；
-- M0 adapter + context/chunk synchronizer = 3 cycles；
-- M1 normalizer + scheduler + reorder installation = 3 cycles；
-- exported DMA-request handshake = 1 cycle；
-- 合计 = 19 cycles；
+- M0：12 次 rule firing + 11 个 module-boundary Pipe hop = 23 cycles；
+- M0 adapter、context/chunk synchronizer 与 M1 normalizer/scheduler/reorder installation = 10 cycles（5 rule + 5 hop）；
+- 合计 = 33 cycles；
 - 首 payload = `C_req + R + K + 3`；
-- 完整 1-KiB chunk = `C_req + R + 2K + 2`，K=8 时为 `R+37`。
+- 完整 1-KiB chunk = `C_req + R + 2K + 2`，K=8 时首 beat 为 `R+44`，完整 chunk 为 `R+51`。
 
 来源路径：`m0_doorbell_analysis/src/TxMvp.bsv`、`m0_doorbell_analysis/src/TxTables.bsv`、
 `integrations/tx/src/M0MessageAdapter.bsv`、`integrations/tx/src/DmaPhaseAIntegration.bsv`、
@@ -127,7 +125,8 @@ Doorbell field decode（正文记为 `D_decode`）。
 IBGDA 对比数据来自 `arXiv:2610.01380` 的 p50 测量：`mini-gda` issue 0.70 µs / put+completion 4.03 µs，
 GDAKI 1.60/6.02 µs，NVSHMEM internal 4.26/9.18 µs，NVSHMEM public 5.31/11.10 µs；平台为
 H200 + ConnectX-7 200-Gb/s IB。正文中的 kSM-cycle 列是按 2.0 GHz SM clock 的换算，不是原作者报告值。
-这些是 GPU-side issue/completion，不是 NIC 内部 cycle；不能与 12/19 NIC cycles 直接相减。
+这些是 GPU-side issue/completion，不是 NIC 内部 cycle；不能与 23/33 NIC cycles 直接相减。
+正文的差值公式还省略了未公开的 IBGDA NIC-side WQE decode cycles，因此只是部分机制账，不是完整延迟模型。
 
 ### 外部 ns-3 artifact 边界
 
@@ -153,7 +152,7 @@ failure，必须由外层 expected-fatal driver 判断预期结果，不能混�
 - `TxCommit`：packet 完整进入 M3 per-channel buffer；不是 MAC 上线、ACK 或 RTT 边界。
 - `TxEgressEvent`：EOF word 从 channel buffer 被消费；仍不是 MAC 上线或远端接收。
 - 2 ns 是 model cycle，不是 achieved FPGA clock。
-- 12/19 cycles 是从当前 functional RTL 的串行 rule/FIFO 路径推导的下界；它们不是 cocotb 实测 latency，也不是 post-route timing。
+- 23/33 cycles 是从当前 functional RTL 的串行 rule/FIFO 路径推导的下界；它们不是 cocotb 实测 latency，也不是 post-route timing。
 - IBGDA 的 0.70/4.03/5.31/11.10 µs 是公开 p50 测量；kSM-cycle 列是按 2 GHz 假设换算，不能与 NIC cycles 直接相减。
 - fixed-per-QP 是 implementation-level baseline，不是 commercial RNIC/RoCE baseline。
 - Fig. 4 是 sampled pass/fail boundary，不是 receive capacity 公式。

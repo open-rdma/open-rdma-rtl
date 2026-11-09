@@ -12,6 +12,7 @@ from openrdma_flow_tb.common import (
     Bit4,
     Bit6,
     Bit7,
+    Bit8,
     Bit13,
     Bit16,
     Bit17,
@@ -75,6 +76,15 @@ class PgtCfgReq(Struct):
 
 class CfgResp(Struct):
     _members_def = OrderedDict(success=Bit1)
+
+
+class GdrpDoorbellWrite(Struct):
+    _members_def = OrderedDict(
+        barOffset=Bit64,
+        token=Bit64,
+        storeBytes=Bit8,
+        byteEnable=Bit8,
+    )
 
 
 class DecodedGdrpSubmission(Struct):

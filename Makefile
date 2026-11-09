@@ -33,6 +33,7 @@ test-all: preflight
 	$(MAKE) test-rx SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 	$(MAKE) -C $(TX_INTEGRATION_DIR) test-integration SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 	$(MAKE) -C $(TX_INTEGRATION_DIR) test-m0chain SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
+	$(MAKE) -C $(TX_INTEGRATION_DIR) test-m0doorbellchain SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 	$(MAKE) test-retx SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 	$(MAKE) test-e2e SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 
@@ -56,6 +57,7 @@ test-long: preflight
 	$(MAKE) test-e2e SIM=$(SIM) PYTHON=$(PYTHON) BSC=$(BSC)
 
 test-negative: preflight
+	$(MAKE) -C $(M0_DIR) test-negative TARGET=decoder SIM=icarus PYTHON=$(PYTHON) BSC=$(BSC)
 	$(MAKE) -C $(M1_DIR) test-negative TARGET=dma SIM=icarus PYTHON=$(PYTHON) BSC=$(BSC)
 	$(MAKE) -C $(TX_INTEGRATION_DIR) test-negative TARGET=integration SIM=icarus PYTHON=$(PYTHON) BSC=$(BSC)
 

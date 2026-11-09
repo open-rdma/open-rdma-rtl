@@ -180,38 +180,56 @@ lower bound for this RTL organization, not a post-route timing result.
 
 \begin{table}[H]
   \centering
-  \caption{Code-derived serialized cycle budget.  The first row starts after a
-  decoded submission is visible; all counts assume no stalls and one-cycle
-  table lookups.  ``Exported'' includes the M0--M1 handshake.}
+  \caption{Code-derived serialized cycle budget.  A module-boundary Pipe
+  transfer costs one cycle because \texttt{toPipeIn}/\texttt{toPipeOut} wrap
+  non-bypass \texttt{mkSizedFIFOF} and \texttt{mkConnection} is a separate rule.
+  Counts assume no stalls and one-cycle table lookups.}
   \label{tab:eval:submission-stages}
   \footnotesize
-  \begin{tabular}{@{}p{0.66\columnwidth}r@{}}
+  \begin{tabular}{@{}p{0.50\columnwidth}rrr@{}}
     \toprule
-    Serialized segment & Cycles \\
+    Serialized segment & Rules & Pipe hops & Cycles \\
     \midrule
-    M0 Slot, MR, QP, and PGT queries plus DMA split & 12 \\
-    M0 adapter and context/chunk synchronizer & 3 \\
-    M1 normalizer, scheduler, and reorder installation & 3 \\
-    Exported DMA-request handshake & 1 \\
+    M0 Slot query & 3 & 2 & 5 \\
+    Frontend--processor handoff & 0 & 1 & 1 \\
+    M0 MR query & 3 & 2 & 5 \\
+    M0 QP reserve/join & 2 & 2 & 4 \\
+    Parsed--PGT issue & 1 & 1 & 2 \\
+    M0 PGT query & 2 & 2 & 4 \\
+    Page fragment and burst split & 1 & 1 & 2 \\
     \midrule
-    Total to first external DMA request & 19 \\
+    M0 subtotal & 12 & 11 & 23 \\
+    \midrule
+    M0--adapter handoff & 0 & 1 & 1 \\
+    Adapter message start & 1 & 0 & 1 \\
+    Adapter--synchronizer handoff & 0 & 1 & 1 \\
+    Synchronizer message start & 1 & 0 & 1 \\
+    Synchronizer--M1 handoff & 0 & 1 & 1 \\
+    M1 normalizer, scheduler, reorder install & 3 & 2 & 5 \\
+    \midrule
+    Total to external DMA request & 17 & 16 & 33 \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-M0 itself needs 12 cycles: three each for the Slot, MR, and PGT
-issue/lookup/join triples, two for the QP reserve/join, and one for the burst
-splitter.  Three adapter/synchronizer hops, three M1 installation stages, and
-the exported handshake add seven cycles.  This count describes the
+M0 itself needs 23 cycles: 12 rule firings and 11 module-boundary Pipe hops.
+The Slot and MR queries each take five cycles (issue, request hop, table rule,
+response hop, join); the QP reserve/join takes four; the PGT path takes six
+(four for the query and two for the parsed-to-PGT issue); and the burst
+splitter adds two.  The adapter, synchronizer, and M1 installation add ten
+cycles, five of which are again Pipe hops.  This count describes the
 \texttt{TxMvp} $\rightarrow$ \texttt{M0MessageAdapter} $\rightarrow$
 \texttt{DmaPhaseAIntegration} topology; the standalone Phase-A testbench starts
 at its own \texttt{contextIn}/\texttt{chunkIn} and is shorter.  Thus
 \begin{equation}
-  C_{\mathrm{req}} = 12 + 3 + 3 + 1 = 19
+  C_{\mathrm{req}} = 23 + 10 = 33.
 \end{equation}
 from submission visibility to the first external DMA-request handshake.  At
-250~MHz this is 76~ns; at 500~MHz it is 38~ns.  Both are clock conversions of
-the same RTL path, not measured operating frequencies.
+250~MHz this is 132~ns; at 500~MHz it is 66~ns.  Both are clock conversions of
+the same RTL path, not measured operating frequencies.  The fact that 16 of 33
+cycles are Pipe hops is an artifact of the modular functional MVP; a flattened
+production integration could remove them, but we have not implemented or
+measured that variant.
 
 \textbf{First payload beat.}
 The M1 completion reorder waits until the entire first chunk is received before
@@ -226,11 +244,12 @@ the first payload beat and the full chunk appear at
 These expressions assume one completion beat per cycle, no downstream
 backpressure, and $R$ expressed in the same NIC clock; if the completion
 interface uses another clock, convert $R$ to time before adding it.
-For a 4-KiB-aligned 1-KiB chunk, $K=8$, so the first beat is $R+30$ and the
-complete chunk is $R+37$; an unaligned chunk has $K=9$ and adds one cycle to
-each.  The $K+3$ term is a deliberate consequence of whole-chunk reordering,
-not a PCIe limit.  A streaming reorder policy could expose the first beat
-earlier, but would no longer guarantee that the chunk's beats leave in order.
+For a 4-KiB-aligned 1-KiB chunk, $K=8$, so the first beat is $R+44$ and the
+complete chunk is $R+51$; an unaligned chunk has $K=9$ and adds one cycle to
+the first beat and two to the complete chunk.  The $K+3$ term is a deliberate
+consequence of whole-chunk reordering, not a PCIe limit.  A streaming reorder
+policy could expose the first beat earlier, but would no longer guarantee that
+the chunk's beats leave in order.
 
 \textbf{Comparison with IBGDA.}
 A conventional GPU-initiated RDMA path first writes a WQE and doorbell record,
@@ -264,18 +283,21 @@ GPU-side issue times, not NIC-internal cycles.
 \end{table}
 
 The measured 0.70-$\mu$s issue floor is 1.4k SM cycles at 2~GHz.  The
-OpenRDMA M0 path is 12 \emph{NIC} cycles, or 24--60~ns at 200--500~MHz.
-These quantities are in different clock domains and must not be subtracted as
-cycles.  Their comparison is meaningful only in time: the on-NIC lookup is
-small relative to the measured GPU issue floor, so the GPU fence, MMIO write,
-and PCIe transport—not the four table lookups—are the likely dominant terms.
+OpenRDMA M0 path is 23 \emph{NIC} cycles (92~ns at 250~MHz, 46~ns at 500~MHz);
+the full path to an external DMA request is 33 cycles (132/66~ns).  These
+quantities are in different clock domains and must not be subtracted as
+cycles.  Their comparison is meaningful only in time: the on-NIC control path
+is small relative to the measured GPU issue floor, so the GPU fence, MMIO
+write, and PCIe transport—not the table lookups or Pipe hops—are the likely
+dominant terms.
 
 The architectural difference is better seen as a transaction count.  For one
 1-KiB operation, Table~\ref{tab:eval:transactions} lists the control and data
 movement.  IBGDA must publish a WQE and a doorbell record, and the NIC must
 fetch the WQE before it can fetch the payload.  OpenRDMA publishes only the
 8-B Doorbell; its Slot, MR, QP, and PGT state lives on the NIC, so there is no
-WQE fetch.  The NIC-side replacement is the 12-cycle M0 lookup/split path.
+WQE fetch.  The NIC-side replacement is the 33-cycle M0/adapter/M1 control path
+(23 cycles within M0).
 
 \begin{table}[H]
   \centering
@@ -300,19 +322,21 @@ to first on-NIC payload; the mechanism difference is
 \begin{equation}
   T_{\mathrm{IBGDA}} - T_{\mathrm{OpenRDMA}}
   \approx T_{\mathrm{WQE\ build}} + T_{\mathrm{dbrec}}
-  + T_{\mathrm{WQE\ fetch}} - \frac{12}{f_{\mathrm{NIC}}}.
+  + T_{\mathrm{WQE\ fetch}} - \frac{33}{f_{\mathrm{NIC}}}.
 \end{equation}
 The equation isolates the WQE work that OpenRDMA removes and the local table
-path it adds.  It does not predict an end-to-end speedup: the common GPU fence,
-MMIO, and PCIe terms are absent from the active RTL and are not measured here.
+path it adds.  It omits IBGDA's unpublished NIC-side WQE-decode cycles, so it
+is a partial accounting rather than a complete latency model.  It does not
+predict an end-to-end speedup: the common GPU fence, MMIO, and PCIe terms are
+absent from the active RTL and are not measured here.
 A same-platform experiment must measure those terms for both designs; comparing
 the 0.70-$\mu$s GPU issue floor with NIC RTL cycles directly would be invalid.
 
 The model also explains why the M0 cycle count should not be optimized in
-isolation.  At 250~MHz the complete request path is 76~ns, while the measured
+isolation.  At 250~MHz the complete request path is 132~ns, while the measured
 minimal GPU issue alone is 700~ns.  The useful architectural claim is therefore
 narrow: OpenRDMA removes WQE construction and a dependent WQE fetch from the
-NIC's critical path, and replaces them with a 12-cycle on-NIC table path.  It
+NIC's critical path, and replaces them with a 33-cycle on-NIC control path.  It
 does not establish a lower GPU-to-NIC latency without a matched
 GPU/PCIe/fence measurement.
 

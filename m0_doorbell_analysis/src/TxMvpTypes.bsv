@@ -25,6 +25,13 @@ typedef struct {
 } DecodedGdrpSubmission deriving(Bits, Eq, FShow);
 
 typedef struct {
+    Bit#(64) barOffset;
+    Bit#(64) token;
+    Bit#(8) storeBytes;
+    Bit#(8) byteEnable;
+} GdrpDoorbellWrite deriving(Bits, Eq, FShow);
+
+typedef struct {
     Bit#(1) valid;
     Bit#(1) allowWriteRelaxed;
     TxLocalLkey localLkey;

@@ -34,14 +34,18 @@ cocotb 必须显式指定安装了 Cocotb 2 的解释器；默认 `SIM=verilator
 | 全树静态门禁 | `make preflight` | package 唯一性、Python import origin、Retx manifest、归档 checksum |
 | 全部 short | `make test-all PYTHON=/path/to/python` | M0–M11、四套 integration、contract/runtime |
 | 全部 long | `make test-long PYTHON=/path/to/python` | 全部已有 long；Retx contract/runtime/M9–M11/Retx seam 当前为显式 short alias |
-| negative | `make test-negative PYTHON=/path/to/python` | M1 与 TX integration expected-fatal |
+| negative | `make test-negative PYTHON=/path/to/python` | M0 Doorbell decoder、M1 与 TX integration expected-fatal |
 | 单模块 | `make -C m2_packet_assembly test PYTHON=...` | 模块独立入口 |
-| TX integration | `make -C integrations/tx test` | DmaPhaseA + M0 chain |
+| TX integration | `make -C integrations/tx test` | DmaPhaseA + decoded M0 chain + normalized Doorbell M0 chain |
 | RX integration | `make -C integrations/rx test` | RxTop + TX→RX loopback |
 | Retx seam | `make -C integrations/retx test` | M9/M10/M11 seam；保留为模块级 seam 测试 |
 | 完整数据链路 | `make -C integrations/e2e test` | M2/M3 + M4–M8 + M9–M11 + replay store + CPU runtime 的重传闭环 |
 | Retx contract | `make -C shared/contracts/retx test` | BSV/Python ABI golden |
 | RX production | `make production-rx-verilog` | `mkRxTop` production Verilog |
+
+M0 Doorbell target 的输入是 normalized write event
+`{barOffset, token, storeBytes, byteEnable}`，当前固定 4 QP / 32 B window，并沿用 MVP 的
+assertion-only fail-stop。它不包含 PCIe TLP 提取、structured error/lifecycle 或 Doorbell credit。
 
 ## 两条 wire profile
 

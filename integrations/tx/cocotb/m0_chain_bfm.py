@@ -8,11 +8,10 @@ TxCommit, and the four channel frame streams -- against a specification that
 is derived exclusively from the submissions and table configurations
 (M0RefModel in m0_chain_model), never from the DUT.
 
-There is intentionally no negative test suite for the m0chain target: the
-glue's assertions (M0CHAIN_*) are cross-checks that fire only when M0 drifts
-from the Phase-A packetizer contract, which cannot be provoked from the test
-boundary by a "valid-looking" input. Invalid inputs are rejected upstream by
-M0's own dynamic asserts (unit-tested in the mvp tx suite).
+There is intentionally no negative test suite for either m0chain target: the
+M0CHAIN_* assertions are cross-checks that cannot be provoked by a
+valid-looking boundary input. Raw Doorbell address and store-shape violations
+are isolated in M0's decoder expected-fatal suite.
 """
 
 from __future__ import annotations
@@ -38,6 +37,7 @@ from openrdma_flow_tb.tx.model.dma_phasea import (
 )
 from m0_chain_model import (
     DecodedGdrpSubmission,
+    GdrpDoorbellWrite,
     MrCfgReq,
     PgtCfgReq,
     QpCfgReq,
@@ -115,10 +115,11 @@ class ExpectedMessage:
 
 
 class M0ChainTB:
-    def __init__(self, dut) -> None:
+    def __init__(self, dut, *, doorbell_bar_offset: int | None = None) -> None:
         self.dut = dut
         self.clock = dut.CLK
         self.resetn = dut.RST_N
+        self.doorbell_bar_offset = doorbell_bar_offset
         self.submission = PipeIn(dut, "submissionPipeIn", self.clock)
         self.slot_cfg_req = PipeIn(dut, "slotCfgReqPipeIn", self.clock)
         self.slot_cfg_resp = PipeOut(dut, "slotCfgRespPipeOut", self.clock)
@@ -332,7 +333,15 @@ async def run_m0_chain_scenario(
             token = make_token(
                 slot_id=spec.slot_id, length=spec.length, debug_seq=spec.debug_seq
             )
-            submission = DecodedGdrpSubmission(qpn=spec.qpn, token=token)
+            if tb.doorbell_bar_offset is None:
+                submission = DecodedGdrpSubmission(qpn=spec.qpn, token=token)
+            else:
+                submission = GdrpDoorbellWrite(
+                    barOffset=tb.doorbell_bar_offset + spec.qpn * 8,
+                    token=token,
+                    storeBytes=8,
+                    byteEnable=0xFF,
+                )
             await tb.submission.enq(submission.pack())
             if metrics is not None:
                 metrics.submission_accept_ps.append(int(get_sim_time("ps")))

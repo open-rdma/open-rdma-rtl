@@ -167,14 +167,12 @@ handshake，再到 M1 `payloadOut` 的首个和完整 1-KiB chunk。
 
 当前 RTL 的串行下界：
 
-- M0 Slot/MR/QP/PGT 查询与 burst split：12 cycles；
-- M0 adapter + context/chunk synchronizer：3 cycles；
-- M1 normalizer + scheduler + reorder installation：3 cycles；
-- exported DMA-request handshake：1 cycle；
-- 合计：19 cycles；
+- M0：12 次 rule firing + 11 个 module-boundary Pipe hop = 23 cycles；
+- M0 adapter + context/chunk synchronizer + M1 normalizer/scheduler/reorder installation = 10 cycles（5 rule + 5 hop）；
+- 合计：33 cycles；
 - 首 payload：`C_req + R + K + 3`；
 - 完整 chunk：`C_req + R + 2K + 2`；
-- 4-KiB-aligned 1-KiB chunk：K=8，首 beat `R+30`，完整 chunk `R+37`。
+- 4-KiB-aligned 1-KiB chunk：K=8，首 beat `R+44`，完整 chunk `R+51`。
 
 这些数字假设 no stall、一周期表查询、one completion beat per cycle、下游 always-ready；不是
 post-route 或实测值。
@@ -196,7 +194,7 @@ post-route 或实测值。
 - no backpressure 与 M1/M2 backpressure；
 - completion in issue order 与 reverse-order batches。
 
-如果实测 cycle 与 12/19 不一致，先定位是额外 FIFO hop、Bluespec rule conflict、completion batching，
+如果实测 cycle 与 23/33 不一致，先定位是额外 FIFO hop、Bluespec rule conflict、completion batching，
 还是 downstream stall；不要为了匹配模型修改测量点。
 
 ### 与 IBGDA 同平台测量
@@ -214,7 +212,7 @@ post-route 或实测值。
 - first payload arrival at NIC（若 NIC counter/timestamp 可得）；
 - p50、p99、run count、SM clock、GPU/NIC 型号、PCIe generation。
 
-IBGDA 的 kSM-cycle 只用于展示 SM-clock 依赖；OpenRDMA 的 12/19 是 NIC RTL cycles。两者必须先换算成 ns，
+IBGDA 的 kSM-cycle 只用于展示 SM-clock 依赖；OpenRDMA 的 23/33 是 NIC RTL cycles。两者必须先换算成 ns，
 不得直接相减。正文中的 0.70/4.03/5.31/11.10 µs 来自公开 p50，不是本仓库实测；本仓库若要主张同平台优势，
 必须重新测量同一 pair。
 

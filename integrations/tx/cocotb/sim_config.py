@@ -19,4 +19,10 @@ TARGETS = {
         "short_modules": ("tests.test_m0_chain",), "long_modules": ("tests.test_m0_chain_long",),
         "verilog_dir": "build/m0chain/verilog", "cocotb_dir": "build/m0chain/cocotb",
     },
+    "m0doorbellchain": {
+        "hdl_toplevel": "mkTestM0DoorbellChain",
+        "short_modules": ("tests.test_m0_doorbell_chain",),
+        "verilog_dir": "build/m0doorbellchain/verilog",
+        "cocotb_dir": "build/m0doorbellchain/cocotb",
+    },
 }
